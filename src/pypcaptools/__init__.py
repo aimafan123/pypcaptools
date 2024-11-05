@@ -1,1 +1,1 @@
-from .splitter import split_flow
+from .pcaphandler import PcapHandler

@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="pypcaptools",
@@ -16,10 +16,10 @@ setup(
     },
     author="ZGC-BUPT-aimafan",
     author_email="chongrufan@nuaa.edu.cn",
-    description="将pcap文件按照session或者flow进行分隔",
+    description="一个用于解析pcap文件的python库",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/ZGC-BUPT-aimafan/flowsplit.git",
+    url="https://github.com/ZGC-BUPT-aimafan/split_flow.git",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

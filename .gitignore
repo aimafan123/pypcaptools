@@ -8,6 +8,6 @@ data/
 .DS_Store
 init_program.sh
 .venv
-flowsplit.egg-info
+*.egg-info
 dist
 build
