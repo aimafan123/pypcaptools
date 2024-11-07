@@ -88,9 +88,11 @@ class PcapHandler:
                 pass
         return tcpstream
 
-    def _save_to_json(self, tcpstream, input_pcap_file, output_dir):
+    def _save_to_json(self, tcpstream, input_pcap_file, output_dir, min_packet_num):
         tcpstreams = []
         for stream in tcpstream:
+            if len(tcpstream[stream]) <= min_packet_num:
+                continue
             time_stamps = [item[0] for item in tcpstream[stream]]
             lengths = [item[1] for item in tcpstream[stream]]
             dict_data = {
@@ -111,30 +113,50 @@ class PcapHandler:
         )
         with open(output_path, "w") as json_file:
             json_file.write(json_data)
-        return True
+        return len(tcpstreams)
 
-    def _save_to_pcap(self, tcpstream, input_pcap_file, output_dir):
+    def _save_to_pcap(self, tcpstream, input_pcap_file, output_dir, min_packet_num):
         packets = scapy.rdpcap(input_pcap_file)
+        session_len = 0
         for stream in tcpstream:
+            if len(tcpstream[stream]) <= min_packet_num:
+                continue
             pcap_name = f"{os.path.basename(input_pcap_file)}_{stream}.pcap"
             output_path = os.path.join(output_dir, pcap_name)
             scapy.wrpcap(output_path, [])
             for packet in tcpstream[stream]:
                 scapy.wrpcap(output_path, [packets[packet[2]]], append=True)
-        return True
+            session_len += 1
+        return session_len
 
     def split_flow(
         self,
         output_dir,
+        min_packet_num=0,
         tcp_from_first_packet=False,
         output_type="pcap",
     ):
+        """
+        output_dir: 分流之后存储的路径
+        min_pcaket_num: 流中最少有多少个数据包, 默认为0
+        tcp_from_first_packet: 分流之后的流，是否一定有握手包，默认不一定
+        output_type: 输出的格式，包括pcap和json，如果输出json的话，那么只有一个json文件
+        """
         if output_type not in ("pcap", "json"):
             raise OSError("output type is error! please select pcap or json")
         tcpstream = self._process_pcap_file(self.input_pcap_file, tcp_from_first_packet)
         os.makedirs(output_dir, exist_ok=True)
-        return (
-            self._save_to_pcap(tcpstream, self.input_pcap_file, output_dir)
-            if output_type == "pcap"
-            else self._save_to_json(tcpstream, self.input_pcap_file, output_dir)
-        )
+        if output_type == "pcap":
+            session_len = self._save_to_pcap(
+                tcpstream, self.input_pcap_file, output_dir, min_packet_num
+            )
+        elif output_type == "json":
+            session_len = self._save_to_json(
+                tcpstream, self.input_pcap_file, output_dir, min_packet_num
+            )
+        return session_len
+
+
+if __name__ == "__main__":
+    pcap_handler = PcapHandler("./test.pcap")
+    aa = pcap_handler.split_flow("test_dir")
