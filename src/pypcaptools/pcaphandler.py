@@ -123,9 +123,11 @@ class PcapHandler:
                 continue
             pcap_name = f"{os.path.basename(input_pcap_file)}_{stream}.pcap"
             output_path = os.path.join(output_dir, pcap_name)
-            scapy.wrpcap(output_path, [])
-            for packet in tcpstream[stream]:
-                scapy.wrpcap(output_path, [packets[packet[2]]], append=True)
+            # 使用 PcapWriter 来创建输出文件，保持输入文件的封装类型
+            with scapy.PcapWriter(output_path, append=False, sync=True) as pcap_writer:
+                # 写入流中满足条件的数据包
+                for packet in tcpstream[stream]:
+                    pcap_writer.write(packets[packet[2]])
             session_len += 1
         return session_len
 
