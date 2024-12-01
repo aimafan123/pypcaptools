@@ -8,7 +8,6 @@ import scapy.all as scapy
 from dpkt.utils import inet_to_str
 import csv 
 
-warnings.filterwarnings("ignore", message="No IPv4 address found")
 class PcapHandler:
     def __init__(self, input_pcap_file):
         self.datalink = 1
@@ -67,12 +66,14 @@ class PcapHandler:
                 pkts = dpkt.pcap.Reader(f)
             except ValueError:
                 f.seek(0)
+
                 pkts = dpkt.pcapng.Reader(f) # 如果不是pcap格式的文件，看看是不是pcapng格式的
             except Exception as e:
                 raise TypeError(f"Unable to open the pcap file: {e}")
 
             self.datalink = pkts.datalink() # 一般情况下一个pcap文件里面使用的都是同一种链路层协议
             number = -1 # 标记当前packet包在原始pcap文件中的序号
+
             try:
                 for time, pkt in pkts:
                     number += 1
@@ -82,6 +83,7 @@ class PcapHandler:
                             "this packet is not ip packet, ignore.", category=Warning
                         )
                         continue
+
                     pro_type = (
                         "TCP"
                         if isinstance(ip.data, dpkt.tcp.TCP)
