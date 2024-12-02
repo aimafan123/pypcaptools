@@ -18,6 +18,8 @@ class PcapHandler:
             return dpkt.ethernet.Ethernet(pkt).data
         elif self.datalink in (228, 229, 101):
             return dpkt.ip.IP(pkt)
+        elif self.datalink == 276:  # linux cooked capture v2
+            return dpkt.sll2.SLL2(pkt).data
         else:
             raise TypeError("Unrecognized link-layer protocol!!!!")
 
@@ -113,7 +115,7 @@ class PcapHandler:
         )
         with open(output_path, "w") as json_file:
             json_file.write(json_data)
-        return len(tcpstreams)
+        return len(tcpstreams), output_path
 
     def _save_to_pcap(self, tcpstream, input_pcap_file, output_dir, min_packet_num):
         packets = scapy.rdpcap(input_pcap_file)
@@ -129,7 +131,7 @@ class PcapHandler:
                 for packet in tcpstream[stream]:
                     pcap_writer.write(packets[packet[2]])
             session_len += 1
-        return session_len
+        return session_len, output_dir
 
     def split_flow(
         self,
@@ -149,14 +151,14 @@ class PcapHandler:
         tcpstream = self._process_pcap_file(self.input_pcap_file, tcp_from_first_packet)
         os.makedirs(output_dir, exist_ok=True)
         if output_type == "pcap":
-            session_len = self._save_to_pcap(
+            session_len, output_path = self._save_to_pcap(
                 tcpstream, self.input_pcap_file, output_dir, min_packet_num
             )
         elif output_type == "json":
-            session_len = self._save_to_json(
+            session_len, output_path = self._save_to_json(
                 tcpstream, self.input_pcap_file, output_dir, min_packet_num
             )
-        return session_len
+        return session_len, output_path
 
 
 if __name__ == "__main__":
