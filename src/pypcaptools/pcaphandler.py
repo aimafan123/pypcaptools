@@ -140,6 +140,7 @@ class PcapHandler:
         tcp_from_first_packet=False,
         output_type="pcap",
     ):
+        # TODO: 加入并行
         """
         output_dir: 分流之后存储的路径
         min_pcaket_num: 流中最少有多少个数据包, 默认为0

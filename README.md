@@ -11,6 +11,7 @@ pip install pypcaptools
 
 ## Quick Start
 
+1. 分流
 ```python
 from pypcaptools import PcapHandler
 
@@ -24,4 +25,23 @@ session_num, output_path = ph.split_flow(output_dir, tcp_from_first_packet=False
 
 # 分流之后以json格式输出，输出一个json文件，其中每一个单元表示一条流，TCP流必须从握手阶段开始，从中途开始的TCP流会被丢弃
 session_num, output_path = ph.split_flow(output_dir, tcp_from_first_packet=True, output_type="json")
+```
+
+2. 将流量分流并加入到mysql数据库中
+```python
+from pypcaptools import PcapToDatabaseHandler
+db_config = {
+    "host": "",
+    "port": 3306,
+    "user": "root",
+    "password": "password",
+    "database": "traffic",
+    "table": "table",
+}
+
+# 参数依次为 处理的pcap路径、mysql配置、应用层协议类型、访问网站/行为、采集机器、table注释
+handler = PcapToDatabaseHandler(
+    "test.pcap", db_config, "https", "github.com", "vultr10", "测试用数据集"
+)
+handler.split_flow_to_database()
 ```
