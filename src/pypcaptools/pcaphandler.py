@@ -36,6 +36,9 @@ class PcapHandler:
 
     def _process_pcap_file(self, file_name, tcp_from_first_packet):
         tcpstream = {}
+        if os.path.getsize(file_name) <= 10:
+            print("The pcap file is empty, skipping...")
+            return None
         with open(file_name, "rb") as f:
             try:
                 pkts = dpkt.pcap.Reader(f)
@@ -150,6 +153,8 @@ class PcapHandler:
         if output_type not in ("pcap", "json"):
             raise OSError("output type is error! please select pcap or json")
         tcpstream = self._process_pcap_file(self.input_pcap_file, tcp_from_first_packet)
+        if tcpstream is None:
+            return
         os.makedirs(output_dir, exist_ok=True)
         if output_type == "pcap":
             session_len, output_path = self._save_to_pcap(

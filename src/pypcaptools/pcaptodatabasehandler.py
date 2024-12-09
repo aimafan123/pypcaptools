@@ -85,6 +85,8 @@ class PcapToDatabaseHandler(PcapHandler):
     def split_flow_to_database(self, min_packet_num=3, tcp_from_first_packet=False):
         # comment：介绍一下这个table
         tcpstream = self._process_pcap_file(self.input_pcap_file, tcp_from_first_packet)
+        if tcpstream is None:
+            return
         self._save_to_database(tcpstream, min_packet_num, self.comment)
 
 

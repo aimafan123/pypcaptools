@@ -2,7 +2,7 @@ import mysql.connector
 
 
 class TrafficDB:
-    def __init__(self, host, port, user, password, database, table, comment):
+    def __init__(self, host, port, user, password, database, table, comment=""):
         self.host = host
         self.user = user
         self.password = password
@@ -25,9 +25,42 @@ class TrafficDB:
             self.cursor = self.conn.cursor()
             self.create_database()
             self.create_table()
-            print("已经成功连接到mysql服务器")
         except mysql.connector.Error as error:
             raise mysql.connector.Error(f"Error connecting to MySQL database: {error}")
+
+    def get_table_columns(self):
+        query = f"SHOW FULL COLUMNS FROM {self.table}"
+        self.cursor.execute(query)
+        columns_info = self.cursor.fetchall()
+        # 格式化结果
+        column_details = []
+        for column in columns_info:
+            column_details.append(
+                {
+                    "Field": column[0],
+                    "Type": column[1],
+                    "Collation": column[2],
+                    "Null": column[3],
+                    "Key": column[4],
+                    "Default": column[5],
+                    "Extra": column[6],
+                    "Comment": column[8],
+                }
+            )
+        return column_details
+
+    def execute(self, sql, value=None):
+        """
+        执行sql语句
+        """
+        if value:
+            self.cursor.execute(sql, value)
+        else:
+            self.cursor.execute(sql)
+
+        values = self.cursor.fetchall()
+
+        return [value[0] for value in values]
 
     def create_database(self):
         self.cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.database}")
@@ -61,7 +94,6 @@ class TrafficDB:
     def close(self):
         if self.conn:
             self.conn.close()
-            print("MySQL connection closed")
 
     def add_traffic(self, traffic_dic):
         # 构建插入语句
