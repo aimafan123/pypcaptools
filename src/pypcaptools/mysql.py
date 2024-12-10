@@ -7,7 +7,7 @@ class TrafficDB:
         self.user = user
         self.password = password
         self.database = database
-        self.port = port
+        self.port = int(port)
         self.table = table
         self.conn = None
         self.cursor = None

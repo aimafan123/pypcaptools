@@ -1,18 +1,14 @@
-import pickle
 from datetime import datetime
 
 from pypcaptools.mysql import TrafficDB
 from pypcaptools.pcaphandler import PcapHandler
-
-
-def serialization(src_data):
-    return pickle.dumps(src_data)
+from pypcaptools.util import DBConfig, serialization
 
 
 class PcapToDatabaseHandler(PcapHandler):
     def __init__(
         self,
-        db_config: dict,
+        db_config: DBConfig,
         input_pcap_file,
         protocol,
         accessed_website,

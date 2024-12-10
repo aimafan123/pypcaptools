@@ -2,6 +2,8 @@
 
 pypcaptools 是一个用于处理pcap文件的 Python 库，可以实现以下功能：
 1. 将流量按照session进行分隔，可以输出pcap格式或json格式。
+2. 将pcap文件导入到mysql数据库中
+3. 从mysql数据库中读取流量数据，并进行统计
 
 ## 安装
 
@@ -63,5 +65,6 @@ traffic_info.use_table("table_name")      # 这里要指定统计的table
 transformed_data = traffic_info.table_columns   # 获得该table的表头和对应注释信息
 
 traffic_num = traffic_info.count_flows("packet_length > 10 and accessed_website == 163.com")  # 获得满足条件的流的个数
-website_list = traffic_info.fetch_all_values("accessed_website")    # 获得table中的网站列表
+website_list = traffic_info.get_value_list_unique("accessed_website")    # 获得table中的网站列表
+website_list = traffic_info.get_payload("packet_length > 10")    # 获得满足特定条件的流的payload序列
 ```

@@ -3,9 +3,10 @@
 import re
 
 from pypcaptools.mysql import TrafficDB
+from pypcaptools.util import DBConfig, deserialization
 
 
-def condition_parse(table, condition_str):
+def condition_parse(condition_str):
     """
     统计MySQL表中满足条件的条目数量（支持复杂字符串条件）。
 
@@ -14,6 +15,8 @@ def condition_parse(table, condition_str):
     :return: 满足条件的条目数量
     """
     # 替换运算符为SQL格式
+    if condition_str == "1 == 1":
+        return "1 = 1", None
     condition_str = condition_str.replace("==", "=").replace("!=", "<>")
 
     # 提取字段、操作符和值
@@ -33,21 +36,18 @@ def condition_parse(table, condition_str):
             value = value[1:-1]
         values.append(value)
 
-    # 拼接最终SQL
-    sql = f"SELECT COUNT(*) FROM {table} WHERE {sql_conditions}"
-
-    return sql, values
+    return sql_conditions, values
 
 
 class TrafficInfo:
-    def __init__(self, db_config: dict):
+    def __init__(self, db_config: DBConfig):
         """
         注意，这里的TrafficInfo是以database为单位的
         db_config = {"host": ,"port": ,"user": ,"password": , "database": }
         """
         self.db_config = db_config
 
-    def use_table(self, table):
+    def use_table(self, table) -> None:
         host = self.db_config["host"]
         user = self.db_config["user"]
         port = self.db_config["port"]
@@ -57,7 +57,7 @@ class TrafficInfo:
         self.traffic = TrafficDB(host, port, user, password, database, self.table)
         self.traffic.connect()
 
-    def count_flows(self, condition: str):
+    def count_flows(self, condition: str = "1 == 1") -> int:
         """
         这里condition可以包含多个语句，每个语句由field, operator, value三部分组成，语句之间使用 and 或者 or 连接，注意，mysql中and的优先级高于or的优先级
         field为table的头，可以使用table_columns获得
@@ -66,11 +66,12 @@ class TrafficInfo:
         例： packet_length >= 10 and accessed_website == 163.com
         Return: int 满足条件的流的数量
         """
-        sql, values = condition_parse(self.table, condition)
+        sql_conditions, values = condition_parse(condition)
+        sql = f"SELECT COUNT(*) FROM {self.table} WHERE {sql_conditions}"
         result = self.traffic.execute(sql, values)
         return result[0]
 
-    def fetch_all_values(self, column_name):
+    def get_value_list_unique(self, field: str, condition: str = "1 == 1") -> list:
         """
         从表中获取指定列的所有唯一值，并返回字符串列表。
 
@@ -79,8 +80,37 @@ class TrafficInfo:
         :param column_name: 需要查询的列名（字符串类型）
         :return: 返回一个包含唯一字符串的列表
         """
-        sql = f"SELECT DISTINCT {column_name} FROM {self.table};"
-        result = self.traffic.execute(sql)
+        assert field in self.table_columns, f"Field must be one of {self.table_columns}"
+        sql_conditions, values = condition_parse(condition)
+        sql = f"SELECT DISTINCT {field} FROM {self.table} WHERE {sql_conditions};"
+        result = self.traffic.execute(sql, values)
+        return result
+
+    def get_payload(self, condition: str = "1 == 1") -> list:
+        # 获得满足一些条件的流的payload序列
+        # 返回payload序列列表
+        sql_conditions, values = condition_parse(condition)
+        sql = f"SELECT payload FROM {self.table} WHERE {sql_conditions}"
+        result = self.traffic.execute(sql, values)
+        payload = [deserialization(x) for x in result]
+        return payload
+
+    def get_timestamp(self, condition: str = "1 == 1") -> list:
+        # 获得满足一些条件的流的时间戳序列（这里的时间是相对时间）
+        # 返回时间戳序列列表
+        sql_conditions, values = condition_parse(condition)
+        sql = f"SELECT timestamp FROM {self.table} WHERE {sql_conditions}"
+        result = self.traffic.execute(sql, values)
+        payload = [deserialization(x) for x in result]
+        return payload
+
+    def get_value_list(self, field: str, condition: str = "1 == 1") -> list:
+        # 获得满足一些条件的流的字段值列表
+        # 返回字段列表
+        assert field in self.table_columns, f"Field must be one of {self.table_columns}"
+        sql_conditions, values = condition_parse(condition)
+        sql = f"SELECT {field} FROM {self.table} WHERE {sql_conditions}"
+        result = self.traffic.execute(sql, values)
         return result
 
     @property
@@ -89,19 +119,14 @@ class TrafficInfo:
         获取数据库表的列信息及对应的注释。
 
         Returns:
-            list: 包含表列名及其注释的字典列表。
-                {
-                    'Field': 列名 (str),
-                    'Comment': 列注释 (str)
-                }
+            list: 包含表列名
         """
         original_data = self.traffic.get_table_columns()
-        transformed_data = [
-            {"Field": item["Field"], "Comment": item["Comment"]}
-            for item in original_data
-        ]
+        field_list = []
+        for item in original_data:
+            field_list.append(item["Field"])
 
-        return transformed_data
+        return field_list
 
 
 if __name__ == "__main__":
