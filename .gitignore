@@ -11,3 +11,4 @@ init_program.sh
 *.egg-info
 dist
 build
+*.pcap

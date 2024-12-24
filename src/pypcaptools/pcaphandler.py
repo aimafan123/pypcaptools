@@ -34,12 +34,12 @@ class PcapHandler:
             return None
         return ip_total_length - ip_header_length - transport_header_length
 
-    def _process_pcap_file(self, file_name, tcp_from_first_packet):
+    def _process_pcap_file(self, tcp_from_first_packet):
         tcpstream = {}
-        if os.path.getsize(file_name) <= 10:
+        if os.path.getsize(self.input_pcap_file) <= 10:
             print("The pcap file is empty, skipping...")
             return None
-        with open(file_name, "rb") as f:
+        with open(self.input_pcap_file, "rb") as f:
             try:
                 pkts = dpkt.pcap.Reader(f)
             except ValueError:
@@ -93,7 +93,53 @@ class PcapHandler:
                 pass
         return tcpstream
 
-    def _save_to_json(self, tcpstream, input_pcap_file, output_dir, min_packet_num):
+    def _process_pcap_file_nosplit(self):
+        tcpstream = []
+        first_src_ip = ""
+        if os.path.getsize(self.input_pcap_file) <= 10:
+            print("The pcap file is empty, skipping...")
+            return None
+        with open(self.input_pcap_file, "rb") as f:
+            try:
+                pkts = dpkt.pcap.Reader(f)
+            except ValueError:
+                f.seek(0)
+                pkts = dpkt.pcapng.Reader(f)
+            except Exception as e:
+                raise TypeError(f"Unable to open the pcap file: {e}")
+
+            self.datalink = pkts.datalink()
+            number = -1
+            try:
+                for time, pkt in pkts:
+                    number += 1
+                    ip = self._getIP(pkt)
+                    if not isinstance(ip, dpkt.ip.IP):
+                        warnings.warn(
+                            "this packet is not ip packet, ignore.", category=Warning
+                        )
+                        continue
+                    pro_txt = (
+                        "UDP"
+                        if isinstance(ip.data, dpkt.udp.UDP)
+                        else "TCP"
+                        if isinstance(ip.data, dpkt.tcp.TCP)
+                        else None
+                    )
+                    if not pro_txt:
+                        continue
+                    payload = self._get_payload_size(ip, pro_txt)
+                    if not first_src_ip:
+                        first_src_ip = inet_to_str(ip.src)
+                    if inet_to_str(ip.src) == first_src_ip:
+                        tcpstream.append([time, f"+{payload}", number])
+                    else:
+                        tcpstream.append([time, f"-{payload}", number])
+            except dpkt.dpkt.NeedData:
+                pass
+        return pro_txt, tcpstream
+
+    def _save_to_json(self, tcpstream, output_dir, min_packet_num):
         tcpstreams = []
         for stream in tcpstream:
             if len(tcpstream[stream]) <= min_packet_num:
@@ -114,19 +160,19 @@ class PcapHandler:
 
         json_data = json.dumps(tcpstreams, separators=(",", ":"), indent=2)
         output_path = os.path.join(
-            output_dir, f"{os.path.basename(input_pcap_file)}.json"
+            output_dir, f"{os.path.basename(self.input_pcap_file)}.json"
         )
         with open(output_path, "w") as json_file:
             json_file.write(json_data)
         return len(tcpstreams), output_path
 
-    def _save_to_pcap(self, tcpstream, input_pcap_file, output_dir, min_packet_num):
-        packets = scapy.rdpcap(input_pcap_file)
+    def _save_to_pcap(self, tcpstream, output_dir, min_packet_num):
+        packets = scapy.rdpcap(self.input_pcap_file)
         session_len = 0
         for stream in tcpstream:
             if len(tcpstream[stream]) <= min_packet_num:
                 continue
-            pcap_name = f"{os.path.basename(input_pcap_file)}_{stream}.pcap"
+            pcap_name = f"{os.path.basename(self.input_pcap_file)}_{stream}.pcap"
             output_path = os.path.join(output_dir, pcap_name)
             # 使用 PcapWriter 来创建输出文件，保持输入文件的封装类型
             with scapy.PcapWriter(output_path, append=False, sync=True) as pcap_writer:
@@ -152,21 +198,25 @@ class PcapHandler:
         """
         if output_type not in ("pcap", "json"):
             raise OSError("output type is error! please select pcap or json")
-        tcpstream = self._process_pcap_file(self.input_pcap_file, tcp_from_first_packet)
+        tcpstream = self._process_pcap_file(tcp_from_first_packet)
         if tcpstream is None:
             return
         os.makedirs(output_dir, exist_ok=True)
         if output_type == "pcap":
             session_len, output_path = self._save_to_pcap(
-                tcpstream, self.input_pcap_file, output_dir, min_packet_num
+                tcpstream, output_dir, min_packet_num
             )
         elif output_type == "json":
             session_len, output_path = self._save_to_json(
-                tcpstream, self.input_pcap_file, output_dir, min_packet_num
+                tcpstream, output_dir, min_packet_num
             )
         return session_len, output_path
 
 
 if __name__ == "__main__":
-    pcap_handler = PcapHandler("./test.pcap")
-    aa = pcap_handler.split_flow("test_dir")
+    pcap_handler = PcapHandler(
+        "./http_20241216214756_141.164.58.43_jp_bilibili.com.pcap"
+    )
+
+    bb, aa = pcap_handler._process_pcap_file_nosplit()
+    print(bb)

@@ -2,7 +2,6 @@
 
 import re
 
-from pypcaptools.mysql import TrafficDB
 from pypcaptools.util import DBConfig, deserialization
 
 
@@ -48,16 +47,14 @@ class TrafficInfo:
         self.db_config = db_config
 
     def use_table(self, table) -> None:
-        host = self.db_config["host"]
-        user = self.db_config["user"]
-        port = self.db_config["port"]
-        password = self.db_config["password"]
-        database = self.db_config["database"]
+        self.host = self.db_config["host"]
+        self.user = self.db_config["user"]
+        self.port = self.db_config["port"]
+        self.password = self.db_config["password"]
+        self.database = self.db_config["database"]
         self.table = table
-        self.traffic = TrafficDB(host, port, user, password, database, self.table)
-        self.traffic.connect()
 
-    def count_flows(self, condition: str = "1 == 1") -> int:
+    def count_flows(self, table_name, condition: str = "1 == 1") -> int:
         """
         这里condition可以包含多个语句，每个语句由field, operator, value三部分组成，语句之间使用 and 或者 or 连接，注意，mysql中and的优先级高于or的优先级
         field为table的头，可以使用table_columns获得
@@ -67,11 +64,13 @@ class TrafficInfo:
         Return: int 满足条件的流的数量
         """
         sql_conditions, values = condition_parse(condition)
-        sql = f"SELECT COUNT(*) FROM {self.table} WHERE {sql_conditions}"
+        sql = f"SELECT COUNT(*) FROM {table_name} WHERE {sql_conditions}"
         result = self.traffic.execute(sql, values)
         return result[0]
 
-    def get_value_list_unique(self, field: str, condition: str = "1 == 1") -> list:
+    def get_value_list_unique(
+        self, table_name, field: str, condition: str = "1 == 1"
+    ) -> list:
         """
         从表中获取指定列的所有唯一值，并返回字符串列表。
 
@@ -82,46 +81,45 @@ class TrafficInfo:
         """
         assert field in self.table_columns, f"Field must be one of {self.table_columns}"
         sql_conditions, values = condition_parse(condition)
-        sql = f"SELECT DISTINCT {field} FROM {self.table} WHERE {sql_conditions};"
+        sql = f"SELECT DISTINCT {field} FROM {table_name} WHERE {sql_conditions};"
         result = self.traffic.execute(sql, values)
         return result
 
-    def get_payload(self, condition: str = "1 == 1") -> list:
+    def get_payload(self, table_name, condition: str = "1 == 1") -> list:
         # 获得满足一些条件的流的payload序列
         # 返回payload序列列表
         sql_conditions, values = condition_parse(condition)
-        sql = f"SELECT payload FROM {self.table} WHERE {sql_conditions}"
+        sql = f"SELECT payload FROM {table_name} WHERE {sql_conditions}"
         result = self.traffic.execute(sql, values)
         payload = [deserialization(x) for x in result]
         return payload
 
-    def get_timestamp(self, condition: str = "1 == 1") -> list:
+    def get_timestamp(self, table_name, condition: str = "1 == 1") -> list:
         # 获得满足一些条件的流的时间戳序列（这里的时间是相对时间）
         # 返回时间戳序列列表
         sql_conditions, values = condition_parse(condition)
-        sql = f"SELECT timestamp FROM {self.table} WHERE {sql_conditions}"
+        sql = f"SELECT timestamp FROM {table_name} WHERE {sql_conditions}"
         result = self.traffic.execute(sql, values)
         payload = [deserialization(x) for x in result]
         return payload
 
-    def get_value_list(self, field: str, condition: str = "1 == 1") -> list:
+    def get_value_list(self, table_name, field: str, condition: str = "1 == 1") -> list:
         # 获得满足一些条件的流的字段值列表
         # 返回字段列表
         assert field in self.table_columns, f"Field must be one of {self.table_columns}"
         sql_conditions, values = condition_parse(condition)
-        sql = f"SELECT {field} FROM {self.table} WHERE {sql_conditions}"
+        sql = f"SELECT {field} FROM {table_name} WHERE {sql_conditions}"
         result = self.traffic.execute(sql, values)
         return result
 
-    @property
-    def table_columns(self) -> list:
+    def table_columns(self, table_name) -> list:
         """
         获取数据库表的列信息及对应的注释。
 
         Returns:
             list: 包含表列名
         """
-        original_data = self.traffic.get_table_columns()
+        original_data = self.traffic.get_table_columns(table_name)
         field_list = []
         for item in original_data:
             field_list.append(item["Field"])
