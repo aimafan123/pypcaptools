@@ -133,6 +133,7 @@ transformed_data = traffic_info.table_columns   # 获得该table的表头和对�
 traffic_num = traffic_info.count_flows("packet_length > 10 and accessed_website == 163.com")  # 获得满足条件的流的个数
 website_list = traffic_info.get_value_list_unique("accessed_website")    # 获得table中的网站列表
 website_list = traffic_info.get_payload("packet_length > 10")    # 获得满足特定条件的流的payload序列
+payload_list = traffic_info.get_trace_flow_payload("accessed_website == bilibili.com")   # 获得一个字典，其中字典的键是trace_id，值为对应的payload序列
 ```
 
 ## 贡献指南
