@@ -1,3 +1,4 @@
+from pypcaptools.Flow import Flow
 from pypcaptools.TrafficDB.TraceDB import TraceDB
 from pypcaptools.TrafficInfo.TrafficInfo import TrafficInfo
 from pypcaptools.util import DBConfig
@@ -51,14 +52,28 @@ class TraceInfo(TrafficInfo):
         # 返回字段列表
         return super().get_value_list(self.table + "_trace", field, condition)
 
-    # def get_trace_flow_payload(self, condition: str = "1 == 1") -> list:
-    #     # 返回属于同一个trace的所有flow的payload
-    #     # 返回一个列表，列表中有若干列表，每个列表是flow的payload序列
-    #     sql_conditions, values = condition_parse(condition)
-    #     sql = f"SELECT payload FROM {self.table + "_flow"} WHERE {sql_conditions} "
-    #     result = self.traffic.execute(sql, values)
-    #     payload = [deserialization(x) for x in result]
-    #     return payload
+    def get_trace_flow(self, condition: str = "1 == 1") -> list:
+        # 返回属于同一个trace的所有flow的payload
+        # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着子列表，子列表是Packet类，Packet类中包含[time, payload, dirct]包括了flow的payload序列
+        # 得到符合条件的trace_id
+        trace_id_list = self.get_value_list("id", condition)
+        trace_dict = {}
+
+        for trace_id in trace_id_list:
+            payload_list = super().get_payload(
+                self.table + "_flow", f"trace_id == {trace_id}"
+            )
+            timestamp_list = super().get_timestamp(
+                self.table + "_flow", f"trace_id == {trace_id}"
+            )
+            flows = []
+            for i in range(len(payload_list)):
+                flows.append(
+                    Flow.from_payload_timestamp_list(payload_list[i], timestamp_list[i])
+                )
+            trace_dict[trace_id] = flows
+
+        return trace_dict
 
     def get_trace_flow_payload(self, condition: str = "1 == 1") -> list:
         # 返回属于同一个trace的所有flow的payload
@@ -74,7 +89,6 @@ class TraceInfo(TrafficInfo):
         return payload_dict
 
     def get_trace_flow_timestamp(self, condition: str = "1 == 1") -> list:
-        # TODO
         # 返回属于同一个trace的所有flow的timestamp
         # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着列表，包括了flow的timestamp序列
         # 得到符合条件的trace_id
