@@ -53,8 +53,7 @@ class TraceInfo(TrafficInfo):
         return super().get_value_list(self.table + "_trace", field, condition)
 
     def get_trace_flow(self, condition: str = "1 == 1") -> list:
-        # 返回属于同一个trace的所有flow的payload
-        # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着子列表，子列表是Packet类，Packet类中包含[time, payload, dirct]包括了flow的payload序列
+        # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着子列表，子列表是flow类，flow类中包含整条流的信息
         # 得到符合条件的trace_id
         trace_id_list = self.get_value_list("id", condition)
         trace_dict = {}

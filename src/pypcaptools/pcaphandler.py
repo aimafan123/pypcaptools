@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+"""
+FileName: pcaphandler.py
+Author: ZGC-BUPT-aimafan
+Create:
+Description:
+处理PCAP文件，解析其中的网络流量数据，并将这些数据按照特定的方式进行分流。
+定义PcapHandler类，提供了多个方法来解析、处理和保存流量数据，包括提取IP数据包、计算负载大小、按TCP流分割流量、以及将处理后的结果保存为PCAP或JSON格式。用户可以指定输出的格式（PCAP或JSON），并根据设定的条件（如最小数据包数）进行分流操作。
+"""
+
 import json
 import os
 import warnings
@@ -89,6 +98,7 @@ class PcapHandler:
                             if first_flag != 2:
                                 continue
                         tcpstream[siyuanzu1] = [[time, f"+{payload}", number]]
+
             except dpkt.dpkt.NeedData:
                 pass
         return tcpstream

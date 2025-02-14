@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+FileName: pcaptodatabasehandler.py
+Author: ZGC-BUPT-aimafan
+Create:
+Description:
+PcapToDatabaseHandler类是PcapHandler类的扩展，旨在将处理后的网络流量数据存储到数据库中。该类的构造函数接受数据库配置信息、输入的PCAP文件路径、协议类型、访问的网站、采集机器信息以及注释等参数。在flow_to_database方法中，该类会解析PCAP文件，将其中的TCP流数据分割，并将数据以flow为单位存入数据库中的特定table，不会保留trace信息。pcap_to_database方法会同时生成trace和flow两个table，用于保留trace信息。
+"""
+
 from datetime import datetime
 
 from pypcaptools.pcaphandler import PcapHandler
@@ -12,6 +21,7 @@ class PcapToDatabaseHandler(PcapHandler):
         db_config: DBConfig,
         input_pcap_file,
         protocol,
+        table_name,
         accessed_website,
         collection_machine="",
         comment="",
@@ -28,6 +38,7 @@ class PcapToDatabaseHandler(PcapHandler):
         self.collection_machine = collection_machine
         self.pcap_path = input_pcap_file
         self.comment = comment
+        self.table = table_name
 
     def _save_to_database(self, tcpstream, min_packet_num, trace_id=-1, first_time=0):
         if trace_id == 0:
@@ -37,7 +48,7 @@ class PcapToDatabaseHandler(PcapHandler):
         port = self.db_config["port"]
         password = self.db_config["password"]
         database = self.db_config["database"]
-        table = self.db_config["table"]
+        table = self.table
 
         if trace_id == -1:
             traffic = FlowDB(host, port, user, password, database, table)
@@ -75,8 +86,8 @@ class PcapToDatabaseHandler(PcapHandler):
                 relative_time = time - first_time
                 relative_timestamps.append(f"{relative_time:.6f}")
                 payload_list.append(payload)
-            traffic_dic["timestamp"] = serialization(relative_timestamps)
-            traffic_dic["payload"] = serialization(payload_list)
+            traffic_dic["timestamp"] = serialization(relative_timestamps[:600000])
+            traffic_dic["payload"] = serialization(payload_list[:600000])
             traffic_dic["protocol"] = self.protocol
             traffic_dic["accessed_website"] = self.accessed_website
             traffic_dic["packet_length"] = len(payload_list)
@@ -88,8 +99,7 @@ class PcapToDatabaseHandler(PcapHandler):
 
             traffic.add_traffic(traffic_dic)
 
-    def split_flow_to_database(self, min_packet_num=3, tcp_from_first_packet=False):
-        # comment：介绍一下这个table
+    def flow_to_database(self, min_packet_num=3, tcp_from_first_packet=False):
         tcpstream = self._process_pcap_file(tcp_from_first_packet)
         if tcpstream is None:
             return
@@ -123,8 +133,8 @@ class PcapToDatabaseHandler(PcapHandler):
             relative_timestamps.append(f"{relative_time:.6f}")
             payload_list.append(payload)
         traffic_dic["flownum"] = flow_num
-        traffic_dic["timestamp"] = serialization(relative_timestamps)
-        traffic_dic["payload"] = serialization(payload_list)
+        traffic_dic["timestamp"] = serialization(relative_timestamps[:600000])
+        traffic_dic["payload"] = serialization(payload_list[:600000])
         traffic_dic["protocol"] = self.protocol
         traffic_dic["accessed_website"] = self.accessed_website
         traffic_dic["packet_length"] = len(payload_list)
