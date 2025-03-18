@@ -12,3 +12,4 @@ init_program.sh
 dist
 build
 *.pcap
+.idea/
