@@ -36,6 +36,7 @@ CREATE TABLE `http_flow` (
   `protocol` varchar(30) DEFAULT NULL COMMENT '协议（HTTPs、Vmess、Tor、Obfs4等）',
   `transport_protocol` enum('TCP','UDP') DEFAULT NULL COMMENT '传输层协议',
   `accessed_website` varchar(255) DEFAULT NULL COMMENT '访问网站域名/应用',
+  `sni` varchar(255) DEFAULT NULL COMMENT 'TLS握手中提供的SNI（Server Name Indication）',
   `packet_length` int unsigned DEFAULT NULL COMMENT '包长度',
   `packet_length_no_payload` int unsigned DEFAULT NULL COMMENT '去除payload为0的包长度',
   `collection_machine` varchar(255) DEFAULT NULL COMMENT '采集机器',

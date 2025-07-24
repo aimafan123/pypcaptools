@@ -8,6 +8,8 @@ class FlowDB(TrafficDB):
         super().__init__(host, port, user, password, database, table, comment)
 
     def create_table(self):
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
         create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {self.table} (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -22,6 +24,7 @@ class FlowDB(TrafficDB):
             protocol VARCHAR(30) COMMENT '协议（HTTPs、Vmess、Tor、Obfs4等）',
             transport_protocol ENUM('TCP', 'UDP') COMMENT '传输层协议',
             accessed_website VARCHAR(255) COMMENT '访问网站域名/应用',
+            sni VARCHAR(255) DEFAULT NULL COMMENT 'TLS握手中提供的SNI（Server Name Indication）',
             packet_length INT UNSIGNED COMMENT '包长度',
             packet_length_no_payload INT UNSIGNED COMMENT '去除payload为0的包长度',
             collection_machine VARCHAR(255) COMMENT '采集机器',
@@ -33,6 +36,8 @@ class FlowDB(TrafficDB):
         self.conn.commit()
 
     def add_traffic(self, traffic_dic):
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
         # 构建插入语句
         # + 记录首次发现时间
         columns = ", ".join(traffic_dic.keys())

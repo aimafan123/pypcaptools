@@ -35,6 +35,7 @@ CREATE TABLE `http` (
   `protocol` varchar(30) DEFAULT NULL COMMENT '协议（HTTPs、Vmess、Tor、Obfs4等）',
   `transport_protocol` enum('TCP','UDP') DEFAULT NULL COMMENT '传输层协议',
   `accessed_website` varchar(255) DEFAULT NULL COMMENT '访问网站域名/应用',
+  `sni` varchar(255) DEFAULT NULL COMMENT 'TLS握手中提供的SNI（Server Name Indication）',
   `packet_length` int unsigned DEFAULT NULL COMMENT '包长度',
   `packet_length_no_payload` int unsigned DEFAULT NULL COMMENT '去除payload为0的包长度',
   `collection_machine` varchar(255) DEFAULT NULL COMMENT '采集机器',
@@ -42,6 +43,7 @@ CREATE TABLE `http` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `source_ip` (`source_ip`,`destination_ip`,`source_port`,`destination_port`,`pcap_path`,`protocol`,`capture_time`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1682963 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 

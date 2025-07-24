@@ -1,3 +1,5 @@
+from typing import Optional, Tuple
+
 import mysql.connector
 
 from pypcaptools.TrafficDB.TrafficDB import TrafficDB
@@ -8,8 +10,11 @@ class TraceDB(TrafficDB):
         super().__init__(host, port, user, password, database, table, comment)
 
     def create_table(self):
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
+
         create_trace_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {self.table+'_trace'} (
+        CREATE TABLE IF NOT EXISTS {self.table + "_trace"} (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
             entry_time DATETIME NOT NULL COMMENT '入库时间',
             capture_time DATETIME COMMENT '采集时间',
@@ -29,7 +34,7 @@ class TraceDB(TrafficDB):
         self.cursor.execute(create_trace_table_sql)
         self.conn.commit()
         create_flow_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {self.table+'_flow'} (
+        CREATE TABLE IF NOT EXISTS {self.table + "_flow"} (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
             trace_id BIGINT NOT NULL COMMENT '关联trace表的ID',
             entry_time DATETIME NOT NULL COMMENT '入库时间',
@@ -43,11 +48,12 @@ class TraceDB(TrafficDB):
             protocol VARCHAR(30) COMMENT '协议（HTTPs、Vmess、Tor、Obfs4等）',
             transport_protocol ENUM('TCP', 'UDP') COMMENT '传输层协议',
             accessed_website VARCHAR(255) COMMENT '访问网站域名/应用',
+            sni VARCHAR(255) DEFAULT NULL COMMENT 'TLS握手中提供的SNI（Server Name Indication）',
             packet_length INT UNSIGNED COMMENT '包长度',
             packet_length_no_payload INT UNSIGNED COMMENT '去除payload为0的包长度',
             collection_machine VARCHAR(255) COMMENT '采集机器',
             pcap_path VARCHAR(255) COMMENT '原始pcap路径',
-            FOREIGN KEY (trace_id) REFERENCES {self.table+'_trace'}(id) ON DELETE CASCADE,
+            FOREIGN KEY (trace_id) REFERENCES {self.table + "_trace"}(id) ON DELETE CASCADE,
             UNIQUE (source_ip, destination_ip, source_port, destination_port, protocol, capture_time)
         );
         """
@@ -57,10 +63,13 @@ class TraceDB(TrafficDB):
     def add_trace(self, traffic_dic):
         # 构建插入语句
         # + 记录首次发现时间
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
+
         columns = ", ".join(traffic_dic.keys())
         placeholders = ", ".join(["%s"] * len(traffic_dic))
         insert_sql = f"""
-        INSERT IGNORE INTO {self.table+'_trace'} ({columns})
+        INSERT IGNORE INTO {self.table + "_trace"} ({columns})
         VALUES ({placeholders});
         """
         values = tuple(traffic_dic.values())
@@ -69,17 +78,30 @@ class TraceDB(TrafficDB):
 
         # 获得id的值，为flow表的插入做准备
         self.cursor.execute("SELECT LAST_INSERT_ID();")
-        inserted_id = self.cursor.fetchone()[0]
+        # 运行时判断结果类型
+        result = self.cursor.fetchone()
+
+        if result is None:
+            inserted_id = -1
+        elif isinstance(result, dict):
+            inserted_id = result.get("LAST_INSERT_ID()", -1)
+        elif isinstance(result, (tuple, list)):
+            inserted_id = result[0] if result[0] is not None else -1
+        else:
+            inserted_id = -1
 
         return inserted_id
 
     def add_traffic(self, traffic_dic):
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
+
         # 构建插入语句
         # + 记录首次发现时间
         columns = ", ".join(traffic_dic.keys())
         placeholders = ", ".join(["%s"] * len(traffic_dic))
         insert_sql = f"""
-        INSERT IGNORE INTO {self.table+'_flow'} ({columns})
+        INSERT IGNORE INTO {self.table + "_flow"} ({columns})
         VALUES ({placeholders});
         """
         values = tuple(traffic_dic.values())

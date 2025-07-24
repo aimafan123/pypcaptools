@@ -29,6 +29,8 @@ class TrafficDB:
             raise mysql.connector.Error(f"Error connecting to MySQL database: {error}")
 
     def get_table_columns(self, table_name):
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
         query = f"SHOW FULL COLUMNS FROM {table_name}"
         self.cursor.execute(query)
         columns_info = self.cursor.fetchall()
@@ -53,6 +55,8 @@ class TrafficDB:
         """
         执行sql语句
         """
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
         if value:
             self.cursor.execute(sql, value)
         else:
@@ -63,6 +67,8 @@ class TrafficDB:
         return [value[0] for value in values]
 
     def create_database(self):
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立，cursor 或 conn 为 None。")
         self.cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.database}")
         self.cursor.execute(f"USE {self.database}")
 

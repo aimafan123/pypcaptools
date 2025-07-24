@@ -42,12 +42,16 @@ class Flow:
             payload_sequence.append(packet.payload)
         return payload_sequence
 
-    def timestamp_sequence(self, dont_include_zero_payload=False):
+    def timestamp_sequence(self, dont_include_zero_payload=False, from_zero_time=True):
         timestamp_sequence = []
+        first_time = self.packets[0].time
         for packet in self.packets:
             if dont_include_zero_payload and packet.is_zero:
                 continue
-            timestamp_sequence.append(packet.time)
+            if from_zero_time:
+                timestamp_sequence.append(packet.time - first_time)
+            else:
+                timestamp_sequence.append(packet.time)
         return timestamp_sequence
 
     def dirction_sequence(self, dont_include_zero_payload=False):
