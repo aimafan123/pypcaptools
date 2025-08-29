@@ -19,7 +19,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple, Union
 
 import mysql.connector
-from scapy.all import IP, TCP, UDP, rdpcap
 
 # 从父类和自定义模块导入必要的组件
 from pypcaptools.pcaphandler import PcapHandler
@@ -33,6 +32,41 @@ from pypcaptools.util import (  # 假设 DBConfig 是一个 Dict[str, Any] 类�
 
 # 定义 trace 表中每个流的最大数据包数量，用于限制序列化数据的大小
 TRACE_MAX_PKT_NUM = 600000
+
+
+def initialize_database_schema(db_config: Dict[str, Any], base_table_name: str):
+    """
+    执行一次性的数据库和表结构初始化。
+    这个函数是独立的，不属于任何类。每次运行最开始可以调用这个函数来确保数据库和表的存在。
+    """
+    print(f"开始检查并初始化数据库和表结构 (基础名称: {base_table_name})...")
+    try:
+        # 完整的表名
+        trace_table = f"{base_table_name}_trace"
+        flow_table = f"{base_table_name}_flow"
+        resource_table = f"{base_table_name}_resource"
+
+        # 实例化DB Handler
+        trace_db = TraceDB(table=trace_table, **db_config)
+        flow_db = FlowDB(table=flow_table, trace_table_name=trace_table, **db_config)
+        resource_db = ResourceDB(
+            table=resource_table, flow_table_name=flow_table, **db_config
+        )
+
+        # 依次执行初始化
+        with trace_db as db:
+            db.setup_database()
+            db.create_table()
+        with flow_db as db:
+            db.create_table()
+        with resource_db as db:
+            db.create_table()
+
+        print("数据库和表结构初始化完成。")
+        return True
+    except Exception as e:
+        print(f"数据库初始化失败: {e}", exc_info=True)
+        return False
 
 
 class PcapToDatabaseHandler(PcapHandler):
@@ -63,15 +97,6 @@ class PcapToDatabaseHandler(PcapHandler):
         self.resource_db = ResourceDB(
             table=resource_table, flow_table_name=flow_table, **db_config
         )
-
-        # 初始化所有的数据库和表
-        with self.trace_db as db:
-            db.setup_database()
-            db.create_table()
-            with self.flow_db as flow_db:
-                flow_db.create_table()
-            with self.resource_db as res_db:
-                res_db.create_table()
 
         self.input_json_file = input_json_file
         self.protocol = protocol
@@ -295,4 +320,6 @@ if __name__ == "__main__":
         accessed_website_name,
         collection_machine_info,
     )
+
+    initialize_database_schema(db_config, my_base_table_name)
     pcap_database_handler.pcap_to_database()

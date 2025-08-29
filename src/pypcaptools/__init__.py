@@ -1,2 +1,2 @@
 from .pcaphandler import PcapHandler
-from .pcaptodatabasehandler import PcapToDatabaseHandler
+from .pcaptodatabasehandler import PcapToDatabaseHandler, initialize_database_schema
