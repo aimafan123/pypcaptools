@@ -13,97 +13,89 @@ class TraceInfo(TrafficInfo):
         self.traffic = TraceDB(
             self.host, self.port, self.user, self.password, self.database, self.table
         )
-        self.traffic.connect()
+        self.traffic.connect()  # 根据您的连接管理逻辑，此行可能是必需的
 
-    def count_flows(self, condition: str = "1 == 1") -> int:
-        """
-        这里condition可以包含多个语句，每个语句由field, operator, value三部分组成，语句之间使用 and 或者 or 连接，注意，mysql中and的优先级高于or的优先级
-        field为table的头，可以使用table_columns获得
-        operator为运算符，包括==, >, <, <=, >=, !=
-        value为具体的值
-        例： packet_length >= 10 and accessed_website == 163.com
-        Return: int 满足条件的流的数量
-        """
+    def count_traces(self, condition: str = "1 == 1") -> int:
         return super().count_flows(self.table + "_trace", condition)
 
     def get_value_list_unique(self, field: str, condition: str = "1 == 1") -> list:
-        """
-        从表中获取指定列的所有唯一值，并返回字符串列表。
-
-        该函数执行一个查询，选取指定列中所有不重复的值，结果返回为一个字符串列表。
-
-        :param column_name: 需要查询的列名（字符串类型）
-        :return: 返回一个包含唯一字符串的列表
-        """
         return super().get_value_list_unique(self.table + "_trace", field, condition)
 
-    def get_payload(self, condition: str = "1 == 1") -> list:
-        # 获得满足一些条件的流的payload序列
-        # 返回payload序列列表
-        return super().get_payload(self.table + "_trace", condition)
-
-    def get_timestamp(self, condition: str = "1 == 1") -> list:
-        # 获得满足一些条件的流的时间戳序列（这里的时间是相对时间）
-        # 返回时间戳序列列表
-        return super().get_timestamp(self.table + "_trace", condition)
-
     def get_value_list(self, field: str, condition: str = "1 == 1") -> list:
-        # 获得满足一些条件的流的字段值列表
-        # 返回字段列表
         return super().get_value_list(self.table + "_trace", field, condition)
 
     def get_trace_flow(self, condition: str = "1 == 1") -> dict:
-        # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着子列表，子列表是flow类，flow类中包含整条流的信息
-        # 得到符合条件的trace_id
         trace_id_list = self.get_value_list("id", condition)
         trace_dict = {}
+        flow_table_name = self.table + "_flow"
 
         for trace_id in trace_id_list:
-            payload_list = super().get_payload(
-                self.table + "_flow", f"trace_id == {trace_id}"
+            flow_condition = f"trace_id == {trace_id}"
+
+            payload_seq_list = super().get_payload_sequence(
+                flow_table_name, flow_condition
             )
-            timestamp_list = super().get_timestamp(
-                self.table + "_flow", f"trace_id == {trace_id}"
+            timestamp_seq_list = super().get_timestamp_sequence(
+                flow_table_name, flow_condition
             )
+            direction_seq_list = super().get_direction_sequence(
+                flow_table_name, flow_condition
+            )
+
             flows = []
-            for i in range(len(payload_list)):
+            if not (
+                len(payload_seq_list)
+                == len(timestamp_seq_list)
+                == len(direction_seq_list)
+            ):
+                print(f"[Warning] Trace ID {trace_id} 的序列长度不匹配，已跳过。")
+                continue
+
+            for i in range(len(payload_seq_list)):
                 flows.append(
-                    Flow.from_payload_timestamp_list(payload_list[i], timestamp_list[i])
+                    Flow.from_sequences(
+                        payload_seq_list[i],
+                        timestamp_seq_list[i],
+                        direction_seq_list[i],
+                    )
                 )
             trace_dict[trace_id] = flows
 
         return trace_dict
 
-    def get_trace_flow_payload(self, condition: str = "1 == 1") -> list:
-        # 返回属于同一个trace的所有flow的payload
-        # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着列表，包括了flow的payload序列
-        # 得到符合条件的trace_id
+    def get_trace_flow_payload_sequence(self, condition: str = "1 == 1") -> dict:
         trace_id_list = self.get_value_list("id", condition)
         payload_dict = {}
+        flow_table_name = self.table + "_flow"
         for trace_id in trace_id_list:
-            payload_list = super().get_payload(
-                self.table + "_flow", f"trace_id == {trace_id}"
+            payload_list = super().get_payload_sequence(
+                flow_table_name, f"trace_id == {trace_id}"
             )
             payload_dict[trace_id] = payload_list
         return payload_dict
 
-    def get_trace_flow_timestamp(self, condition: str = "1 == 1") -> list:
-        # 返回属于同一个trace的所有flow的timestamp
-        # 返回一个字典，字典的键是trace_id，值是一个列表，列表中嵌套着列表，包括了flow的timestamp序列
-        # 得到符合条件的trace_id
+    def get_trace_flow_timestamp_sequence(self, condition: str = "1 == 1") -> dict:
         trace_id_list = self.get_value_list("id", condition)
         timestamp_dict = {}
+        flow_table_name = self.table + "_flow"
         for trace_id in trace_id_list:
-            timestamp_list = super().get_timestamp(
-                self.table + "_flow", f"trace_id == {trace_id}"
+            timestamp_list = super().get_timestamp_sequence(
+                flow_table_name, f"trace_id == {trace_id}"
             )
             timestamp_dict[trace_id] = timestamp_list
         return timestamp_dict
 
+    def get_trace_flow_direction_sequence(self, condition: str = "1 == 1") -> dict:
+        trace_id_list = self.get_value_list("id", condition)
+        direction_dict = {}
+        flow_table_name = self.table + "_flow"
+        for trace_id in trace_id_list:
+            direction_list = super().get_direction_sequence(
+                flow_table_name, f"trace_id == {trace_id}"
+            )
+            direction_dict[trace_id] = direction_list
+        return direction_dict
+
     @property
     def table_columns(self) -> list:
-        return super().table_columns(self.table + "_trace")
-
-
-if __name__ == "__main__":
-    pass
+        return super().table_columns(self.table)

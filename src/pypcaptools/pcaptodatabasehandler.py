@@ -122,6 +122,7 @@ class PcapToDatabaseHandler(PcapHandler):
         # 从PcapHandler获取解析好的数据
         trace_pcap_data = self.get_trace_sequence()
         flows_pcap_data = self.get_flow_sequences()
+
         tcp_flow_count = sum(
             1
             for flow in flows_pcap_data.values()
@@ -290,7 +291,7 @@ if __name__ == "__main__":
     # --- 示例数据库配置 ---
     # 请根据您的实际数据库环境修改以下配置信息
     db_config: DBConfig = {
-        "host": "localhost",  # 数据库主机名或IP地址
+        "host": "192.168.194.63",  # 数据库主机名或IP地址
         "port": 3306,  # 数据库端口
         "user": "root",  # 数据库用户名
         "password": "aimafan",  # 数据库密码
@@ -301,8 +302,8 @@ if __name__ == "__main__":
     # --- 示例 PCAP 文件路径 ---
     # 请确保此路径指向一个实际存在的 PCAP 文件，或在运行前创建此文件
     # 例如，您可以下载一个测试用的 PCAP 文件到当前目录
-    test_pcap_file = "/home/aimafan/Documents/mycode/pypcaptools/test/direct_20250828061117_141.164.58.43_ko_apple.com.pcap"
-    test_json_file = "/home/aimafan/Documents/mycode/pypcaptools/test/direct_20250828061117_141.164.58.43_ko_apple.com.json"
+    test_pcap_file = "/home/aimafan/Document/mycode/pypcaptools/test/direct_20250828061117_141.164.58.43_ko_apple.com.pcap"
+    test_json_file = "/home/aimafan/Document/mycode/pypcaptools/test/direct_20250828061117_141.164.58.43_ko_apple.com.json"
 
     # --- 测试数据参数 ---
     protocol_type = "direct"  # 示例协议类型

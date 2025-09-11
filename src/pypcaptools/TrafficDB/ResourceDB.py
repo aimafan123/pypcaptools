@@ -35,7 +35,7 @@ class ResourceDB(TrafficDB):
         CREATE TABLE IF NOT EXISTS `{self.table}` (
           `id` bigint NOT NULL AUTO_INCREMENT,
           `flow_id` bigint NOT NULL COMMENT '关联到flows表的ID',
-          `stream_id` int unsigned DEFAULT NULL,
+          `stream_id` varchar(64) DEFAULT NULL COMMENT '流ID，可为纯数字或字符串，如 12 或 http1-0',
           `url` text,
           `http_status` smallint DEFAULT NULL,
           `content_type` varchar(255) DEFAULT NULL,

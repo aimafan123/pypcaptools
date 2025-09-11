@@ -5,7 +5,7 @@ DROP TABLE IF EXISTS `resources`;
 CREATE TABLE `resources` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `flow_id` bigint NOT NULL COMMENT '关联到flows表的ID',
-  `stream_id` int unsigned DEFAULT NULL COMMENT 'HTTP/2的流ID',
+  `stream_id` varchar(64) DEFAULT NULL COMMENT '流ID，可为纯数字或字符串，如 12 或 http1-0',
   `url` text COMMENT '资源的完整URL',
   `http_status` smallint DEFAULT NULL COMMENT 'HTTP状态码 (e.g., 200, 204)',
   `content_type` varchar(255) DEFAULT NULL COMMENT '资源类型 (e.g., text/html, application/javascript)',

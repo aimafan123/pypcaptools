@@ -17,6 +17,41 @@ class TrafficDB:
         self.conn = None
         self.cursor = None
 
+    def connect(self):
+        """(新增) 显式建立数据库连接的方法"""
+        try:
+            self.conn = mysql.connector.connect(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                database=self.database,
+            )
+            self.cursor = self.conn.cursor(dictionary=True)
+            return self
+        except mysql.connector.Error as err:
+            if err.errno == mysql.connector.errorcode.ER_BAD_DB_ERROR:
+                self.conn = mysql.connector.connect(
+                    host=self.host,
+                    port=self.port,
+                    user=self.user,
+                    password=self.password,
+                )
+                self.cursor = self.conn.cursor(dictionary=True)
+                print(
+                    f"数据库 '{self.database}' 不存在。您可能需要运行 setup_database() 方法进行初始化。"
+                )
+                return self
+            else:
+                raise
+
+    def close(self):
+        """(新增) 显式关闭数据库连接的方法"""
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
+
     def __enter__(self):
         """
         进入 'with' 语句的运行时上下文。

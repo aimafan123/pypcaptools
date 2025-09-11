@@ -45,6 +45,7 @@ class FlowDB(TrafficDB):
           `timestamps_seq` JSON,
           `payload_seq` JSON NOT NULL,
           `direction_seq` JSON NOT NULL,
+          `http_version` varchar(16) DEFAULT NULL COMMENT 'HTTP协议版本，如 http1.1 或 http2',
           `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (`id`),
           KEY `idx_trace_id` (`trace_id`),
