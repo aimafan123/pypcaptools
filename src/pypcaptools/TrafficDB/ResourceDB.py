@@ -21,7 +21,7 @@ class ResourceDB(TrafficDB):
         database,
         table: str,
         flow_table_name: str,
-        comment="存储Flow中的具体资源",
+        comment="存储Flow中承载的具体资源，作为模型训练的标签",
     ):
         super().__init__(host, port, user, password, database, table, comment)
         self.flow_table_name = flow_table_name
@@ -36,13 +36,16 @@ class ResourceDB(TrafficDB):
           `id` bigint NOT NULL AUTO_INCREMENT,
           `flow_id` bigint NOT NULL COMMENT '关联到flows表的ID',
           `stream_id` varchar(64) DEFAULT NULL COMMENT '流ID，可为纯数字或字符串，如 12 或 http1-0',
-          `url` text,
-          `http_status` smallint DEFAULT NULL,
-          `content_type` varchar(255) DEFAULT NULL,
-          `resource_size_bytes` bigint unsigned DEFAULT NULL,
-          `server_packet_count` int unsigned DEFAULT NULL,
-          `latency_ms` double DEFAULT NULL,
-          `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+          `url` text COMMENT '资源的完整URL',
+          `http_status` smallint DEFAULT NULL COMMENT 'HTTP状态码 (e.g., 200, 204)',
+          `content_type` varchar(255) DEFAULT NULL COMMENT '资源类型 (e.g., text/html, application/javascript)',
+          `resource_size_bytes` bigint unsigned DEFAULT NULL COMMENT '资源大小 (字节)',
+          `server_packet_count` int unsigned DEFAULT NULL COMMENT '传输该资源的服务器包数量',
+          `packet_seq_list` json DEFAULT NULL COMMENT '涉及该资源的数据包序号列表(JSON数组，如 [12, 34])',
+          `response_start_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源响应开始时间(精确到微秒)',
+          `response_end_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源响应结束时间(精确到微秒)',
+          `latency_ms` double DEFAULT NULL COMMENT '资源加载延迟 (毫秒)',
+          `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
           PRIMARY KEY (`id`),
           KEY `idx_flow_id` (`flow_id`),
           /* ### MODIFIED ###: 使用动态的父表名创建外键 */
@@ -65,11 +68,19 @@ class ResourceDB(TrafficDB):
         Returns:
             int: 新插入行的 ID。如果未插入，则返回 0。
         """
-        columns = ", ".join(f"`{k}`" for k in resource_data.keys())
-        placeholders = ", ".join(["%s"] * len(resource_data))
+        # 预处理 JSON 字段
+        data_to_insert = resource_data.copy()
+        json_fields = ["packet_seq_list"]
+        for field in json_fields:
+            if field in data_to_insert and data_to_insert[field] is not None:
+                if not isinstance(data_to_insert[field], str):
+                    data_to_insert[field] = json.dumps(data_to_insert[field])
+
+        columns = ", ".join(f"`{k}`" for k in data_to_insert.keys())
+        placeholders = ", ".join(["%s"] * len(data_to_insert))
 
         insert_sql = f"INSERT INTO `{self.table}` ({columns}) VALUES ({placeholders})"
-        values = tuple(resource_data.values())
+        values = tuple(data_to_insert.values())
 
         rows_affected = self.execute_commit(insert_sql, values)
 
@@ -92,19 +103,29 @@ class ResourceDB(TrafficDB):
         if not resources_data:
             return 0
 
+        # 预处理所有记录的 JSON 字段
+        json_fields = ["packet_seq_list"]
+        processed_data = []
+        for row in resources_data:
+            processed_row = row.copy()
+            for field in json_fields:
+                if field in processed_row and processed_row[field] is not None:
+                    if not isinstance(processed_row[field], str):
+                        processed_row[field] = json.dumps(processed_row[field])
+            processed_data.append(processed_row)
+
         # 以第一个数据字典为模板，构建 SQL 语句
-        sample_row = resources_data[0]
+        sample_row = processed_data[0]
         columns = ", ".join(f"`{k}`" for k in sample_row.keys())
         placeholders = ", ".join(["%s"] * len(sample_row))
         insert_sql = f"INSERT INTO `{self.table}` ({columns}) VALUES ({placeholders})"
 
         # 将所有值转换为元组列表
-        values_list = [tuple(row.values()) for row in resources_data]
+        values_list = [tuple(row.values()) for row in processed_data]
 
         # 执行批量插入
         if self.cursor is None or self.conn is None:
             raise RuntimeError("数据库连接未建立。")
         self.cursor.executemany(insert_sql, values_list)
         self.conn.commit()
-
         return self.cursor.rowcount

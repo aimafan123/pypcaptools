@@ -15,7 +15,7 @@ import json
 import os
 import re
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple, Union
 
 import mysql.connector
@@ -25,16 +25,13 @@ from pypcaptools.pcaphandler import PcapHandler
 from pypcaptools.TrafficDB.FlowDB import FlowDB
 from pypcaptools.TrafficDB.ResourceDB import ResourceDB
 from pypcaptools.TrafficDB.TraceDB import TraceDB
-from pypcaptools.util import (  # 假设 DBConfig 是一个 Dict[str, Any] 类型别名
-    DBConfig,
-    serialization,
-)
+from pypcaptools.util import DBConfig, serialization
 
 # 定义 trace 表中每个流的最大数据包数量，用于限制序列化数据的大小
 TRACE_MAX_PKT_NUM = 600000
 
 
-def initialize_database_schema(db_config: Dict[str, Any], base_table_name: str):
+def initialize_database_schema(db_config: DBConfig, base_table_name: str):
     """
     执行一次性的数据库和表结构初始化。
     这个函数是独立的，不属于任何类。每次运行最开始可以调用这个函数来确保数据库和表的存在。
@@ -65,7 +62,8 @@ def initialize_database_schema(db_config: Dict[str, Any], base_table_name: str):
         print("数据库和表结构初始化完成。")
         return True
     except Exception as e:
-        print(f"数据库初始化失败: {e}", exc_info=True)
+        # print 的 exc_info 参数无效，直接打印异常并保留可读性
+        print(f"数据库初始化失败: {e}")
         return False
 
 
@@ -76,7 +74,7 @@ class PcapToDatabaseHandler(PcapHandler):
 
     def __init__(
         self,
-        db_config: Dict[str, Any],
+        db_config: DBConfig,
         base_table_name: str,
         input_pcap_file: str,
         input_json_file: str,
@@ -210,10 +208,11 @@ class PcapToDatabaseHandler(PcapHandler):
 
                 flows_to_insert.append(flow_db_data)
 
-                # 暂存resource数据，此时还不知道flow_id
-                # 我们用pcap_key作为临时标识
+                # 暂存resource数据 + 时间计算所需的flow上下文
                 flow_id_map[matched_pcap_key] = {
-                    "resources": json_flow_info.get("resources", [])
+                    "resources": json_flow_info.get("resources", []),
+                    "flow_start_time_ms": flow_db_data.get("flow_start_time_ms", 0),
+                    "timestamps_seq": flow_db_data.get("timestamps_seq", []),
                 }
 
             # --- 步骤 2.1: 批量插入 `flows` ---
@@ -244,6 +243,8 @@ class PcapToDatabaseHandler(PcapHandler):
                 if "id" not in flow_info:
                     continue  # 如果流未成功插入，则跳过其资源
                 flow_id = flow_info["id"]
+                flow_start_ms = flow_info.get("flow_start_time_ms", 0)
+                flow_ts_seq = flow_info.get("timestamps_seq", [])
 
                 for resource in flow_info.get("resources", []):
                     # 过滤不完整的资源
@@ -252,18 +253,66 @@ class PcapToDatabaseHandler(PcapHandler):
                     ):
                         continue
 
+                    packet_seq_list = resource.get("response_packet_nums", [])
+                    response_start_ts = None
+                    response_end_ts = None
+
+                    if (
+                        isinstance(packet_seq_list, list)
+                        and packet_seq_list
+                        and flow_ts_seq
+                    ):
+                        is_zero_based = 0 in packet_seq_list or (
+                            min(packet_seq_list) == 0
+                        )
+                        idxs = []
+                        for n in packet_seq_list:
+                            i = n if is_zero_based else n - 1
+                            if 0 <= i < len(flow_ts_seq):
+                                idxs.append(i)
+
+                        if idxs:
+                            start_offset_s = min(flow_ts_seq[i] for i in idxs)
+                            end_offset_s = max(flow_ts_seq[i] for i in idxs)
+                            flow_start_dt = trace_pcap_data["capture_time"] + timedelta(
+                                milliseconds=flow_start_ms
+                            )
+                            response_start_ts = flow_start_dt + timedelta(
+                                seconds=start_offset_s
+                            )
+                            response_end_ts = flow_start_dt + timedelta(
+                                seconds=end_offset_s
+                            )
+
+                    # 如果JSON中提供了绝对时间戳，优先使用它们
+                    try:
+                        if resource.get("response_start_time") is not None:
+                            response_start_ts = datetime.fromtimestamp(
+                                float(resource.get("response_start_time"))
+                            )
+                        if resource.get("response_end_time") is not None:
+                            response_end_ts = datetime.fromtimestamp(
+                                float(resource.get("response_end_time"))
+                            )
+                    except Exception:
+                        # 如果转换失败，保留之前计算的结果或None
+                        pass
+
                     resources_to_insert.append(
                         {
                             "flow_id": flow_id,
                             "stream_id": resource.get("stream_id"),
                             "url": resource.get("url"),
-                            "http_status": resource.get("status"),
+                            "http_status": int(resource.get("status"))
+                            if resource.get("status") is not None
+                            else None,
                             "content_type": resource.get("content_type"),
                             "resource_size_bytes": resource.get("resource_data_size"),
-                            "server_packet_count": len(
-                                resource.get("response_packet_nums", [])
-                            ),
-                            "latency_ms": resource.get("ttfb_sec", 0) * 1000,
+                            "server_packet_count": len(packet_seq_list),
+                            "packet_seq_list": packet_seq_list,
+                            "response_start_ts": response_start_ts,
+                            "response_end_ts": response_end_ts,
+                            "latency_ms": float(resource.get("ttfb_sec", 0)) * 1000,
                         }
                     )
 
@@ -297,17 +346,17 @@ if __name__ == "__main__":
         "password": "aimafan",  # 数据库密码
         "database": "WebsitesTraffic_test",  # 数据库名称
     }
-    my_base_table_name = "direct_top_100"
+    my_base_table_name = "trojan_top_100"
 
     # --- 示例 PCAP 文件路径 ---
     # 请确保此路径指向一个实际存在的 PCAP 文件，或在运行前创建此文件
     # 例如，您可以下载一个测试用的 PCAP 文件到当前目录
-    test_pcap_file = "/home/aimafan/Document/mycode/pypcaptools/test/direct_20250828061117_141.164.58.43_ko_apple.com.pcap"
-    test_json_file = "/home/aimafan/Document/mycode/pypcaptools/test/direct_20250828061117_141.164.58.43_ko_apple.com.json"
+    test_pcap_file = "/home/aimafan/Documents/mycode/pypcaptools/test/81045_20251020_16_20_02_github.com.pcap"
+    test_json_file = "/home/aimafan/Documents/mycode/pypcaptools/test/results.json"
 
     # --- 测试数据参数 ---
-    protocol_type = "direct"  # 示例协议类型
-    trace_table_name = flow_table_name = "direct"  # 存储 Flow 数据的表名
+    protocol_type = "trojan"  # 示例协议类型
+    trace_table_name = flow_table_name = "trojan"  # 存储 Flow 数据的表名
 
     accessed_website_name = "apple.com"  # 访问的网站
     collection_machine_info = "debian12_ko"  # 采集机器信息
