@@ -309,7 +309,7 @@ class PcapToDatabaseHandler(PcapHandler):
                             "content_type": resource.get("content_type"),
                             "resource_size_bytes": resource.get("resource_data_size"),
                             "server_packet_count": len(packet_seq_list),
-                            "packet_seq_list": packet_seq_list,
+                            "trace_packet_indices": packet_seq_list,
                             "response_start_ts": response_start_ts,
                             "response_end_ts": response_end_ts,
                             "latency_ms": float(resource.get("ttfb_sec", 0)) * 1000,

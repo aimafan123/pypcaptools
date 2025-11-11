@@ -14,6 +14,7 @@ import json
 import os
 import socket
 import struct
+import time
 import warnings
 from collections import defaultdict
 from datetime import datetime
@@ -62,8 +63,8 @@ class PcapHandler:
                             continue
                         ip = eth.data
 
-                        # 确保是TCP或UDP包
-                        if not isinstance(ip.data, (dpkt.tcp.TCP, dpkt.udp.UDP)):
+                        # 确保是TCP包
+                        if not isinstance(ip.data, (dpkt.tcp.TCP)):
                             continue
                         transport = ip.data
 
@@ -152,8 +153,7 @@ class PcapHandler:
         (接口和功能保持不变)
         """
         flows = defaultdict(lambda: {"packets": [], "transport_protocol": None})
-
-        for pkt_data in self.packets:
+        for i, pkt_data in enumerate(self.packets):
             ip_layer = pkt_data["ip"]
             transport_layer = pkt_data["transport"]
 
@@ -173,7 +173,8 @@ class PcapHandler:
                 flow_key = f"{proto}_{dst_ip}:{dport}_{src_ip}:{sport}"
 
             flows[flow_key]["transport_protocol"] = proto
-            flows[flow_key]["packets"].append(pkt_data)
+
+            flows[flow_key]["packets"].append((i + 1, pkt_data))
 
         processed_flows = {}
         trace_start_time = float(self.packets[0]["ts"]) if self.packets else 0
@@ -209,20 +210,26 @@ class PcapHandler:
                     port2,
                 )
 
-            first_pkt_time = float(data["packets"][0]["ts"])
+            first_pkt_time = float(data["packets"][0][1]["ts"])
 
-            timestamps_seq, payload_seq, direction_seq = [], [], []
+            timestamps_seq, payload_seq, direction_seq, trace_packet_indices = (
+                [],
+                [],
+                [],
+                [],
+            )
 
-            for p_data in data["packets"]:
+            for index, p_data in data["packets"]:
                 timestamps_seq.append(float(p_data["ts"]) - first_pkt_time)
                 payload_seq.append(len(p_data["transport"].data))
+                trace_packet_indices.append(index)
 
                 # 判断方向
                 pkt_src_ip = socket.inet_ntoa(p_data["ip"].src)
                 direction_seq.append(1 if pkt_src_ip == source_ip else -1)
 
             flow_duration_ms = (
-                float(data["packets"][-1]["ts"]) - first_pkt_time
+                float(data["packets"][-1][1]["ts"]) - first_pkt_time
             ) * 1000
 
             processed_flows[key] = {
@@ -236,6 +243,7 @@ class PcapHandler:
                 "timestamps_seq": timestamps_seq,
                 "payload_seq": payload_seq,
                 "direction_seq": direction_seq,
+                "trace_packet_indices": trace_packet_indices,
             }
         return processed_flows
 

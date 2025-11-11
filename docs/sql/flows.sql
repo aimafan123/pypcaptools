@@ -17,6 +17,7 @@ CREATE TABLE `flows` (
   `payload_seq` JSON NOT NULL COMMENT '包大小序列',
   `direction_seq` JSON NOT NULL COMMENT '包方向序列 (-表示出, +表示入)，用于模型输入',
   `http_version` varchar(16) DEFAULT NULL COMMENT 'HTTP协议版本，如 http1.1 或 http2',
+  `trace_packet_indices` json DEFAULT NULL COMMENT '本flow包含的数据包在traces主序列中的索引列表 (JSON数组, e.g., [0, 2, 3, 7])',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_trace_id` (`trace_id`),

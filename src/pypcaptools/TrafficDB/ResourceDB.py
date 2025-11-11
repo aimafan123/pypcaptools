@@ -41,7 +41,7 @@ class ResourceDB(TrafficDB):
           `content_type` varchar(255) DEFAULT NULL COMMENT '资源类型 (e.g., text/html, application/javascript)',
           `resource_size_bytes` bigint unsigned DEFAULT NULL COMMENT '资源大小 (字节)',
           `server_packet_count` int unsigned DEFAULT NULL COMMENT '传输该资源的服务器包数量',
-          `packet_seq_list` json DEFAULT NULL COMMENT '涉及该资源的数据包序号列表(JSON数组，如 [12, 34])',
+          `trace_packet_indices` json DEFAULT NULL COMMENT '涉及该资源的数据包序号列表(JSON数组，如 [12, 34])',
           `response_start_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源响应开始时间(精确到微秒)',
           `response_end_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源响应结束时间(精确到微秒)',
           `latency_ms` double DEFAULT NULL COMMENT '资源加载延迟 (毫秒)',
@@ -70,7 +70,7 @@ class ResourceDB(TrafficDB):
         """
         # 预处理 JSON 字段
         data_to_insert = resource_data.copy()
-        json_fields = ["packet_seq_list"]
+        json_fields = ["trace_packet_indices"]
         for field in json_fields:
             if field in data_to_insert and data_to_insert[field] is not None:
                 if not isinstance(data_to_insert[field], str):
@@ -104,7 +104,7 @@ class ResourceDB(TrafficDB):
             return 0
 
         # 预处理所有记录的 JSON 字段
-        json_fields = ["packet_seq_list"]
+        json_fields = ["trace_packet_indices"]
         processed_data = []
         for row in resources_data:
             processed_row = row.copy()

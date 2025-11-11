@@ -46,6 +46,7 @@ class FlowDB(TrafficDB):
           `payload_seq` JSON NOT NULL,
           `direction_seq` JSON NOT NULL,
           `http_version` varchar(16) DEFAULT NULL COMMENT 'HTTP协议版本，如 http1.1 或 http2',
+          `trace_packet_indices` json DEFAULT NULL COMMENT '本flow包含的数据包在traces主序列中的索引列表 (JSON数组, e.g., [0, 2, 3, 7])',
           `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (`id`),
           KEY `idx_trace_id` (`trace_id`),
@@ -70,7 +71,12 @@ class FlowDB(TrafficDB):
             int: 新插入行的 ID。如果未插入，则返回 0。
         """
         data_to_insert = flow_data.copy()
-        json_fields = ["timestamps_seq", "payload_seq", "direction_seq"]
+        json_fields = [
+            "timestamps_seq",
+            "payload_seq",
+            "direction_seq",
+            "trace_packet_indices",
+        ]
         for field in json_fields:
             if field in data_to_insert and data_to_insert[field] is not None:
                 if not isinstance(data_to_insert[field], str):
@@ -105,7 +111,12 @@ class FlowDB(TrafficDB):
             return 0
 
         # 预处理所有记录的 JSON 字段
-        json_fields = ["timestamps_seq", "payload_seq", "direction_seq"]
+        json_fields = [
+            "timestamps_seq",
+            "payload_seq",
+            "direction_seq",
+            "trace_packet_indices",
+        ]
         processed_data = []
         for row in flows_data:
             processed_row = row.copy()
