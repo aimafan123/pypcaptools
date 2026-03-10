@@ -53,15 +53,25 @@ class PcapHandler:
         try:
             with open(self.input_pcap_file, "rb") as f:
                 pcap_reader = dpkt.pcap.Reader(f)
+                # 获取数据链路层类型 (Datalink Type)
+                # DLT_EN10MB (1) 是以太网, DLT_LINUX_SLL (113) 是 Linux Cooked v1
+                dlt = pcap_reader.datalink()
                 for timestamp, buf in pcap_reader:
                     try:
                         # 解析以太网层
-                        eth = dpkt.ethernet.Ethernet(buf)
+                        # 根据不同的链路层类型进行解析
+                        if dlt == dpkt.pcap.DLT_EN10MB:
+                            link_layer = dpkt.ethernet.Ethernet(buf)
+                        elif dlt == dpkt.pcap.DLT_LINUX_SLL:
+                            link_layer = dpkt.sll.SLL(buf)
+                        else:
+                            # 遇到不支持的链路层类型，跳过
+                            continue
 
                         # 确保是IP包
-                        if not isinstance(eth.data, dpkt.ip.IP):
+                        if not isinstance(link_layer.data, dpkt.ip.IP):
                             continue
-                        ip = eth.data
+                        ip = link_layer.data
 
                         # 确保是TCP包
                         if not isinstance(ip.data, (dpkt.tcp.TCP)):
