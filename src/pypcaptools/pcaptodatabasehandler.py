@@ -77,9 +77,9 @@ class PcapToDatabaseHandler(PcapHandler):
         db_config: DBConfig,
         base_table_name: str,
         input_pcap_file: str,
-        input_json_file: str,
-        protocol: str,
-        accessed_website: str,
+        input_json_file: str = "",
+        protocol: str = "direct",
+        accessed_website: str = "unknown",
         collection_machine: str = "",
     ):
         super().__init__(input_pcap_file)
@@ -110,12 +110,16 @@ class PcapToDatabaseHandler(PcapHandler):
             print(f"PCAP文件 '{self.input_pcap_file}' 为空或加载失败，无法入库。")
             return False
 
-        try:
-            with open(self.input_json_file, "r") as f:
-                json_data = json.load(f)
-        except Exception as e:
-            print(f"无法读取或解析JSON文件 '{self.input_json_file}': {e}")
-            return False
+        has_json = bool(self.input_json_file and os.path.exists(self.input_json_file))
+        json_data = {}
+
+        if has_json:
+            try:
+                with open(self.input_json_file, "r") as f:
+                    json_data = json.load(f)
+            except Exception as e:
+                print(f"无法读取或解析JSON文件 '{self.input_json_file}': {e}")
+                return False
 
         # 从PcapHandler获取解析好的数据
         trace_pcap_data = self.get_trace_sequence()
@@ -155,174 +159,201 @@ class PcapToDatabaseHandler(PcapHandler):
 
             print(f"成功插入trace记录到 '{self.trace_db.table}', ID: {trace_id}")
 
-            # --- 步骤 2 & 3: 循环插入 `flows` 和 `resources` 表 ---
-            flows_to_insert = []
-            resources_to_insert = []
-            flow_id_map = {}  # 用于存储 pcap_flow_key -> 数据库flow_id 的映射
-
-            for json_flow_key, json_flow_info in json_data.items():
-                # 解析JSON key以匹配PCAP key
-                match = re.search(
-                    r"(\d{1,3}(?:\.\d{1,3}){3}):(\d+) <-> (\d{1,3}(?:\.\d{1,3}){3}):(\d+)",
-                    json_flow_key,
+            if has_json and json_data:
+                print(
+                    f"JSON文件 '{self.input_json_file}' 已成功加载，准备将JSON数据与PCAP数据关联并插入数据库。"
                 )
-                if not match:
-                    warnings.warn(f"无法解析JSON key '{json_flow_key}'，跳过此流。")
-                    continue
+                # --- 步骤 2 & 3: 循环插入 `flows` 和 `resources` 表 ---
+                flows_to_insert = []
+                resources_to_insert = []
+                flow_id_map = {}  # 用于存储 pcap_flow_key -> 数据库flow_id 的映射
 
-                ip1, port1, ip2, port2 = match.groups()
-                port1, port2 = int(port1), int(port2)
-
-                # 查找所有可能的pcap_flow_key (TCP和UDP)
-                pcap_flow_key_options = []
-                for proto in ["TCP", "UDP"]:
-                    if ip1 < ip2 or (ip1 == ip2 and port1 < port2):
-                        pcap_flow_key_options.append(
-                            f"{proto}_{ip1}:{port1}_{ip2}:{port2}"
-                        )
-                    else:
-                        pcap_flow_key_options.append(
-                            f"{proto}_{ip2}:{port2}_{ip1}:{port1}"
-                        )
-
-                pcap_flow = None
-                matched_pcap_key = None
-                for key_option in pcap_flow_key_options:
-                    if key_option in flows_pcap_data:
-                        pcap_flow = flows_pcap_data[key_option]
-                        matched_pcap_key = key_option
-                        break
-
-                if not pcap_flow:
-                    warnings.warn(
-                        f"在PCAP中未找到与JSON key '{json_flow_key}' 匹配的流。"
+                for json_flow_key, json_flow_info in json_data.items():
+                    # 解析JSON key以匹配PCAP key
+                    match = re.search(
+                        r"(\d{1,3}(?:\.\d{1,3}){3}):(\d+) <-> (\d{1,3}(?:\.\d{1,3}){3}):(\d+)",
+                        json_flow_key,
                     )
-                    continue
-
-                # 准备 `flows` 表的数据
-                flow_db_data = pcap_flow.copy()  # 复制pcap解析的数据
-                flow_db_data["trace_id"] = trace_id  # 关联到主表
-                # 如果PCAP中没提取到SNI，则使用JSON中的
-                if not flow_db_data.get("sni"):
-                    flow_db_data["sni"] = json_flow_info.get("sni")
-
-                flows_to_insert.append(flow_db_data)
-
-                # 暂存resource数据 + 时间计算所需的flow上下文
-                flow_id_map[matched_pcap_key] = {
-                    "resources": json_flow_info.get("resources", []),
-                    "flow_start_time_ms": flow_db_data.get("flow_start_time_ms", 0),
-                    "timestamps_seq": flow_db_data.get("timestamps_seq", []),
-                }
-
-            # --- 步骤 2.1: 批量插入 `flows` ---
-            with self.flow_db as db:
-                db.add_flows(flows_to_insert)
-                just_inserted_flows = db.query(
-                    f"SELECT id, source_ip, source_port, destination_ip, destination_port, transport_protocol FROM `{db.table}` WHERE trace_id = %s",
-                    (trace_id,),
-                )
-                # 创建一个用于快速查找的键
-                for inserted_flow in just_inserted_flows:
-                    proto = inserted_flow["transport_protocol"]
-                    ip1, p1 = inserted_flow["source_ip"], inserted_flow["source_port"]
-                    ip2, p2 = (
-                        inserted_flow["destination_ip"],
-                        inserted_flow["destination_port"],
-                    )
-                    if ip1 < ip2 or (ip1 == ip2 and p1 < p2):
-                        pcap_key = f"{proto}_{ip1}:{p1}_{ip2}:{p2}"
-                    else:
-                        pcap_key = f"{proto}_{ip2}:{p2}_{ip1}:{p1}"
-
-                    if pcap_key in flow_id_map:
-                        flow_id_map[pcap_key]["id"] = inserted_flow["id"]
-
-            # --- 步骤 3.1: 准备并批量插入 `resources` ---
-            for pcap_key, flow_info in flow_id_map.items():
-                if "id" not in flow_info:
-                    continue  # 如果流未成功插入，则跳过其资源
-                flow_id = flow_info["id"]
-                flow_start_ms = flow_info.get("flow_start_time_ms", 0)
-                flow_ts_seq = flow_info.get("timestamps_seq", [])
-
-                for resource in flow_info.get("resources", []):
-                    # 过滤不完整的资源
-                    if "incomplete" in resource.get("url", "") or not resource.get(
-                        "status"
-                    ):
+                    if not match:
+                        warnings.warn(f"无法解析JSON key '{json_flow_key}'，跳过此流。")
                         continue
 
-                    packet_seq_list = resource.get("response_packet_nums", [])
-                    response_start_ts = None
-                    response_end_ts = None
+                    ip1, port1, ip2, port2 = match.groups()
+                    port1, port2 = int(port1), int(port2)
 
-                    if (
-                        isinstance(packet_seq_list, list)
-                        and packet_seq_list
-                        and flow_ts_seq
-                    ):
-                        is_zero_based = 0 in packet_seq_list or (
-                            min(packet_seq_list) == 0
+                    # 查找所有可能的pcap_flow_key (TCP和UDP)
+                    pcap_flow_key_options = []
+                    for proto in ["TCP", "UDP"]:
+                        if ip1 < ip2 or (ip1 == ip2 and port1 < port2):
+                            pcap_flow_key_options.append(
+                                f"{proto}_{ip1}:{port1}_{ip2}:{port2}"
+                            )
+                        else:
+                            pcap_flow_key_options.append(
+                                f"{proto}_{ip2}:{port2}_{ip1}:{port1}"
+                            )
+
+                    pcap_flow = None
+                    matched_pcap_key = None
+                    for key_option in pcap_flow_key_options:
+                        if key_option in flows_pcap_data:
+                            pcap_flow = flows_pcap_data[key_option]
+                            matched_pcap_key = key_option
+                            break
+
+                    if not pcap_flow:
+                        warnings.warn(
+                            f"在PCAP中未找到与JSON key '{json_flow_key}' 匹配的流。"
                         )
-                        idxs = []
-                        for n in packet_seq_list:
-                            i = n if is_zero_based else n - 1
-                            if 0 <= i < len(flow_ts_seq):
-                                idxs.append(i)
+                        continue
 
-                        if idxs:
-                            start_offset_s = min(flow_ts_seq[i] for i in idxs)
-                            end_offset_s = max(flow_ts_seq[i] for i in idxs)
-                            flow_start_dt = trace_pcap_data["capture_time"] + timedelta(
-                                milliseconds=flow_start_ms
-                            )
-                            response_start_ts = flow_start_dt + timedelta(
-                                seconds=start_offset_s
-                            )
-                            response_end_ts = flow_start_dt + timedelta(
-                                seconds=end_offset_s
-                            )
+                    # 准备 `flows` 表的数据
+                    flow_db_data = pcap_flow.copy()  # 复制pcap解析的数据
+                    flow_db_data["trace_id"] = trace_id  # 关联到主表
+                    # 如果PCAP中没提取到SNI，则使用JSON中的
+                    if not flow_db_data.get("sni"):
+                        flow_db_data["sni"] = json_flow_info.get("sni")
 
-                    # 如果JSON中提供了绝对时间戳，优先使用它们
-                    try:
-                        if resource.get("response_start_time") is not None:
-                            response_start_ts = datetime.fromtimestamp(
-                                float(resource.get("response_start_time"))
-                            )
-                        if resource.get("response_end_time") is not None:
-                            response_end_ts = datetime.fromtimestamp(
-                                float(resource.get("response_end_time"))
-                            )
-                    except Exception:
-                        # 如果转换失败，保留之前计算的结果或None
-                        pass
+                    flows_to_insert.append(flow_db_data)
 
-                    resources_to_insert.append(
-                        {
-                            "flow_id": flow_id,
-                            "stream_id": resource.get("stream_id"),
-                            "url": resource.get("url"),
-                            "http_status": int(resource.get("status"))
-                            if resource.get("status") is not None
-                            else None,
-                            "content_type": resource.get("content_type"),
-                            "resource_size_bytes": resource.get("resource_data_size"),
-                            "server_packet_count": len(packet_seq_list),
-                            "trace_packet_indices": packet_seq_list,
-                            "response_start_ts": response_start_ts,
-                            "response_end_ts": response_end_ts,
-                            "latency_ms": float(resource.get("ttfb_sec", 0)) * 1000,
-                        }
+                    # 暂存resource数据 + 时间计算所需的flow上下文
+                    flow_id_map[matched_pcap_key] = {
+                        "resources": json_flow_info.get("resources", []),
+                        "flow_start_time_ms": flow_db_data.get("flow_start_time_ms", 0),
+                        "timestamps_seq": flow_db_data.get("timestamps_seq", []),
+                    }
+
+                # --- 步骤 2.1: 批量插入 `flows` ---
+                with self.flow_db as db:
+                    db.add_flows(flows_to_insert)
+                    just_inserted_flows = db.query(
+                        f"SELECT id, source_ip, source_port, destination_ip, destination_port, transport_protocol FROM `{db.table}` WHERE trace_id = %s",
+                        (trace_id,),
                     )
+                    # 创建一个用于快速查找的键
+                    for inserted_flow in just_inserted_flows:
+                        proto = inserted_flow["transport_protocol"]
+                        ip1, p1 = (
+                            inserted_flow["source_ip"],
+                            inserted_flow["source_port"],
+                        )
+                        ip2, p2 = (
+                            inserted_flow["destination_ip"],
+                            inserted_flow["destination_port"],
+                        )
+                        if ip1 < ip2 or (ip1 == ip2 and p1 < p2):
+                            pcap_key = f"{proto}_{ip1}:{p1}_{ip2}:{p2}"
+                        else:
+                            pcap_key = f"{proto}_{ip2}:{p2}_{ip1}:{p1}"
 
-            if resources_to_insert:
-                with self.resource_db as db:
-                    inserted_count = db.add_resources(resources_to_insert)
+                        if pcap_key in flow_id_map:
+                            flow_id_map[pcap_key]["id"] = inserted_flow["id"]
+
+                # --- 步骤 3.1: 准备并批量插入 `resources` ---
+                for pcap_key, flow_info in flow_id_map.items():
+                    if "id" not in flow_info:
+                        continue  # 如果流未成功插入，则跳过其资源
+                    flow_id = flow_info["id"]
+                    flow_start_ms = flow_info.get("flow_start_time_ms", 0)
+                    flow_ts_seq = flow_info.get("timestamps_seq", [])
+
+                    for resource in flow_info.get("resources", []):
+                        # 过滤不完整的资源
+                        if "incomplete" in resource.get("url", "") or not resource.get(
+                            "status"
+                        ):
+                            continue
+
+                        packet_seq_list = resource.get("response_packet_nums", [])
+                        response_start_ts = None
+                        response_end_ts = None
+
+                        if (
+                            isinstance(packet_seq_list, list)
+                            and packet_seq_list
+                            and flow_ts_seq
+                        ):
+                            is_zero_based = 0 in packet_seq_list or (
+                                min(packet_seq_list) == 0
+                            )
+                            idxs = []
+                            for n in packet_seq_list:
+                                i = n if is_zero_based else n - 1
+                                if 0 <= i < len(flow_ts_seq):
+                                    idxs.append(i)
+
+                            if idxs:
+                                start_offset_s = min(flow_ts_seq[i] for i in idxs)
+                                end_offset_s = max(flow_ts_seq[i] for i in idxs)
+                                flow_start_dt = trace_pcap_data[
+                                    "capture_time"
+                                ] + timedelta(milliseconds=flow_start_ms)
+                                response_start_ts = flow_start_dt + timedelta(
+                                    seconds=start_offset_s
+                                )
+                                response_end_ts = flow_start_dt + timedelta(
+                                    seconds=end_offset_s
+                                )
+
+                        # 如果JSON中提供了绝对时间戳，优先使用它们
+                        try:
+                            if resource.get("response_start_time") is not None:
+                                response_start_ts = datetime.fromtimestamp(
+                                    float(resource.get("response_start_time"))
+                                )
+                            if resource.get("response_end_time") is not None:
+                                response_end_ts = datetime.fromtimestamp(
+                                    float(resource.get("response_end_time"))
+                                )
+                        except Exception:
+                            # 如果转换失败，保留之前计算的结果或None
+                            pass
+
+                        resources_to_insert.append(
+                            {
+                                "flow_id": flow_id,
+                                "stream_id": resource.get("stream_id"),
+                                "url": resource.get("url"),
+                                "http_status": int(resource.get("status"))
+                                if resource.get("status") is not None
+                                else None,
+                                "content_type": resource.get("content_type"),
+                                "resource_size_bytes": resource.get(
+                                    "resource_data_size"
+                                ),
+                                "server_packet_count": len(packet_seq_list),
+                                "trace_packet_indices": packet_seq_list,
+                                "response_start_ts": response_start_ts,
+                                "response_end_ts": response_end_ts,
+                                "latency_ms": float(resource.get("ttfb_sec", 0)) * 1000,
+                            }
+                        )
+
+                if resources_to_insert:
+                    with self.resource_db as db:
+                        inserted_count = db.add_resources(resources_to_insert)
+                        print(
+                            f"成功批量插入 {inserted_count} 条resource记录到 '{db.table}'。"
+                        )
+            else:
+                # ==========================================
+                # 分支 B: 无 JSON 文件，仅处理纯 PCAP 里的 Flow 数据
+                # ==========================================
+                print(
+                    "未提供有效的 JSON 数据，将跳过 Resource 表，仅入库所有抓取的 Flow 数据..."
+                )
+                flows_to_insert = []
+                for pcap_flow_key, pcap_flow in flows_pcap_data.items():
+                    flow_db_data = pcap_flow.copy()
+                    flow_db_data["trace_id"] = trace_id
+                    flows_to_insert.append(flow_db_data)
+
+                if flows_to_insert:
+                    with self.flow_db as db:
+                        db.add_flows(flows_to_insert)
                     print(
-                        f"成功批量插入 {inserted_count} 条resource记录到 '{db.table}'。"
+                        f"成功批量插入 {len(flows_to_insert)} 条纯 PCAP flow记录到 '{db.table}'。"
                     )
-
             print(f"成功处理并提交Trace ID: {trace_id} 的所有数据。")
             return True
 
@@ -353,6 +384,7 @@ if __name__ == "__main__":
     # 例如，您可以下载一个测试用的 PCAP 文件到当前目录
     test_pcap_file = "/home/aimafan/Documents/mycode/pypcaptools/test/81045_20251020_16_20_02_github.com.pcap"
     test_json_file = "/home/aimafan/Documents/mycode/pypcaptools/test/results.json"
+    # test_json_file = ""
 
     # --- 测试数据参数 ---
     protocol_type = "trojan"  # 示例协议类型
