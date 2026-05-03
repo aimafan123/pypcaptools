@@ -1,18 +1,18 @@
-"""查询已导入数据库的 trace 记录。
+"""查询 resource 记录，并 join 对应的 flow 和 trace 特征输入。
 
 示例：
-    python examples/trace_info.py --base-table direct_traffic \
-        --condition "accessed_website == 'example.com'"
+    python examples/resource_info.py --base-table direct_traffic \
+        --condition "http_status == 200"
 """
 
 import argparse
 import os
 
-from pypcaptools.TrafficInfo import TraceInfo
+from pypcaptools.TrafficInfo import ResourceInfo
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="查询已入库的 trace 特征。")
+    parser = argparse.ArgumentParser(description="查询已入库的 resource 特征。")
     parser.add_argument(
         "--base-table",
         default="direct_traffic",
@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--condition",
         default="1 == 1",
-        help="简单的 Python 风格过滤条件，例如：accessed_website == 'example.com'。",
+        help="简单的 Python 风格过滤条件，例如：http_status == 200。",
     )
     parser.add_argument("--host", default=os.getenv("MYSQL_HOST", "localhost"))
     parser.add_argument("--port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")))
@@ -41,16 +41,17 @@ def main() -> None:
         "database": args.database,
     }
 
-    trace_info = TraceInfo(db_config)
-    trace_info.use_table(args.base_table)
+    resource_info = ResourceInfo(db_config)
+    resource_info.use_table(args.base_table)
 
-    count = trace_info.count_traces(args.condition)
-    websites = trace_info.get_value_list_unique("accessed_website", args.condition)
-    payload_by_trace = trace_info.get_trace_flow_payload_sequence(args.condition)
+    rows = resource_info.get_feature_inputs(args.condition)
+    print(f"resource 数量: {len(rows)}")
 
-    print(f"trace 数量: {count}")
-    print(f"前 10 个网站: {websites[:10]}")
-    print(f"包含 flow payload 的 trace 数量: {len(payload_by_trace)}")
+    if rows:
+        first = rows[0]
+        print(f"第一条 resource ID: {first['resource_id']}")
+        print(f"第一条 URL: {first['url']}")
+        print(f"第一条 flow payload 包数量: {len(first['flow_payload_seq'])}")
 
 
 if __name__ == "__main__":
