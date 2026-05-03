@@ -5,6 +5,7 @@ DROP TABLE IF EXISTS `traces`;
 CREATE TABLE `traces` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `accessed_website` varchar(255) NOT NULL COMMENT '访问的目标网站域名，作为主要标签',
+  `site_id` varchar(255) DEFAULT NULL COMMENT '站点标识；默认可与 accessed_website 相同',
   `capture_time` datetime NOT NULL COMMENT '数据采集的起始时间',
   `timestamps_seq` JSON COMMENT '包时间戳序列 (相对于流开始时间)，用于模型输入',
   `payload_seq` JSON NOT NULL COMMENT '包大小序列',

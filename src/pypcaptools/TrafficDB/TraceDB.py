@@ -31,6 +31,7 @@ class TraceDB(TrafficDB):
         CREATE TABLE IF NOT EXISTS `{self.table}` (
           `id` bigint NOT NULL AUTO_INCREMENT,
           `accessed_website` varchar(255) NOT NULL,
+          `site_id` varchar(255) DEFAULT NULL COMMENT '站点标识；默认可与 accessed_website 相同',
           `capture_time` datetime NOT NULL,
           `timestamps_seq` JSON,
           `payload_seq` JSON NOT NULL,
@@ -49,6 +50,11 @@ class TraceDB(TrafficDB):
         """
         print(f"正在为 '{self.table}' 执行建表操作...")
         self.execute_commit(create_table_sql)
+        self.ensure_columns(
+            {
+                "site_id": "`site_id` varchar(255) DEFAULT NULL COMMENT '站点标识；默认可与 accessed_website 相同' AFTER `accessed_website`",
+            }
+        )
         print("数据表创建成功 (如果它尚不存在)。")
 
     def add_trace(self, trace_data: dict) -> int:

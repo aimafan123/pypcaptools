@@ -35,16 +35,28 @@ class ResourceDB(TrafficDB):
         CREATE TABLE IF NOT EXISTS `{self.table}` (
           `id` bigint NOT NULL AUTO_INCREMENT,
           `flow_id` bigint NOT NULL COMMENT '关联到flows表的ID',
+          `resource_index` int unsigned DEFAULT NULL COMMENT '资源在flow中的顺序，从0开始',
           `stream_id` varchar(64) DEFAULT NULL COMMENT '流ID，可为纯数字或字符串，如 12 或 http1-0',
           `url` text COMMENT '资源的完整URL',
           `http_status` smallint DEFAULT NULL COMMENT 'HTTP状态码 (e.g., 200, 204)',
           `content_type` varchar(255) DEFAULT NULL COMMENT '资源类型 (e.g., text/html, application/javascript)',
+          `request_size_bytes` bigint unsigned DEFAULT NULL COMMENT '请求体大小 (字节)',
           `resource_size_bytes` bigint unsigned DEFAULT NULL COMMENT '资源大小 (字节)',
+          `headers_packet_num` int unsigned DEFAULT NULL COMMENT '请求HEADERS所在的TCP-only包号',
+          `headers_flow_packet_num` int unsigned DEFAULT NULL COMMENT '请求HEADERS所在的flow内包号',
+          `request_packet_count` int unsigned DEFAULT NULL COMMENT '传输该资源请求的包数量',
           `server_packet_count` int unsigned DEFAULT NULL COMMENT '传输该资源的服务器包数量',
-          `trace_packet_indices` json DEFAULT NULL COMMENT '涉及该资源的数据包序号列表(JSON数组，如 [12, 34])',
+          `request_packet_nums` json DEFAULT NULL COMMENT '请求相关TCP-only包号列表(JSON数组)',
+          `response_packet_nums` json DEFAULT NULL COMMENT '响应相关TCP-only包号列表(JSON数组)',
+          `request_flow_packet_nums` json DEFAULT NULL COMMENT '请求相关flow内包号列表(JSON数组)',
+          `response_flow_packet_nums` json DEFAULT NULL COMMENT '响应相关flow内包号列表(JSON数组)',
+          `trace_packet_indices` json DEFAULT NULL COMMENT '涉及该资源的TCP-only包号列表(JSON数组，如 [12, 34])',
+          `request_start_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源请求开始时间(精确到微秒)',
           `response_start_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源响应开始时间(精确到微秒)',
           `response_end_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源响应结束时间(精确到微秒)',
-          `latency_ms` double DEFAULT NULL COMMENT '资源加载延迟 (毫秒)',
+          `ttfb_ms` double DEFAULT NULL COMMENT '请求到响应首包的时间 (毫秒)',
+          `duration_ms` double DEFAULT NULL COMMENT '请求到响应结束的总时长 (毫秒)',
+          `latency_ms` double DEFAULT NULL COMMENT '兼容旧字段：请求到响应首包的时间 (毫秒)',
           `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
           PRIMARY KEY (`id`),
           KEY `idx_flow_id` (`flow_id`),
@@ -56,6 +68,22 @@ class ResourceDB(TrafficDB):
             f"正在为 '{self.table}' 执行建表操作 (关联到 '{self.flow_table_name}')..."
         )
         self.execute_commit(create_table_sql)
+        self.ensure_columns(
+            {
+                "resource_index": "`resource_index` int unsigned DEFAULT NULL COMMENT '资源在flow中的顺序，从0开始' AFTER `flow_id`",
+                "request_size_bytes": "`request_size_bytes` bigint unsigned DEFAULT NULL COMMENT '请求体大小 (字节)' AFTER `content_type`",
+                "headers_packet_num": "`headers_packet_num` int unsigned DEFAULT NULL COMMENT '请求HEADERS所在的TCP-only包号' AFTER `resource_size_bytes`",
+                "headers_flow_packet_num": "`headers_flow_packet_num` int unsigned DEFAULT NULL COMMENT '请求HEADERS所在的flow内包号' AFTER `headers_packet_num`",
+                "request_packet_count": "`request_packet_count` int unsigned DEFAULT NULL COMMENT '传输该资源请求的包数量' AFTER `headers_packet_num`",
+                "request_packet_nums": "`request_packet_nums` json DEFAULT NULL COMMENT '请求相关TCP-only包号列表(JSON数组)' AFTER `server_packet_count`",
+                "response_packet_nums": "`response_packet_nums` json DEFAULT NULL COMMENT '响应相关TCP-only包号列表(JSON数组)' AFTER `request_packet_nums`",
+                "request_flow_packet_nums": "`request_flow_packet_nums` json DEFAULT NULL COMMENT '请求相关flow内包号列表(JSON数组)' AFTER `response_packet_nums`",
+                "response_flow_packet_nums": "`response_flow_packet_nums` json DEFAULT NULL COMMENT '响应相关flow内包号列表(JSON数组)' AFTER `request_flow_packet_nums`",
+                "request_start_ts": "`request_start_ts` timestamp(6) NULL DEFAULT NULL COMMENT '资源请求开始时间(精确到微秒)' AFTER `trace_packet_indices`",
+                "ttfb_ms": "`ttfb_ms` double DEFAULT NULL COMMENT '请求到响应首包的时间 (毫秒)' AFTER `response_end_ts`",
+                "duration_ms": "`duration_ms` double DEFAULT NULL COMMENT '请求到响应结束的总时长 (毫秒)' AFTER `ttfb_ms`",
+            }
+        )
         print("数据表创建成功 (如果它尚不存在)。")
 
     def add_resource(self, resource_data: Dict[str, Any]) -> int:
@@ -70,7 +98,13 @@ class ResourceDB(TrafficDB):
         """
         # 预处理 JSON 字段
         data_to_insert = resource_data.copy()
-        json_fields = ["trace_packet_indices"]
+        json_fields = [
+            "trace_packet_indices",
+            "request_packet_nums",
+            "response_packet_nums",
+            "request_flow_packet_nums",
+            "response_flow_packet_nums",
+        ]
         for field in json_fields:
             if field in data_to_insert and data_to_insert[field] is not None:
                 if not isinstance(data_to_insert[field], str):
@@ -104,7 +138,13 @@ class ResourceDB(TrafficDB):
             return 0
 
         # 预处理所有记录的 JSON 字段
-        json_fields = ["trace_packet_indices"]
+        json_fields = [
+            "trace_packet_indices",
+            "request_packet_nums",
+            "response_packet_nums",
+            "request_flow_packet_nums",
+            "response_flow_packet_nums",
+        ]
         processed_data = []
         for row in resources_data:
             processed_row = row.copy()

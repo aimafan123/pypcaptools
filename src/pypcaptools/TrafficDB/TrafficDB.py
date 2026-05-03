@@ -1,4 +1,5 @@
 import mysql.connector
+from typing import Dict
 
 
 class TrafficDB:
@@ -141,6 +142,33 @@ class TrafficDB:
         self.cursor.execute(sql, params or ())
         self.conn.commit()
         return self.cursor.rowcount
+
+    def ensure_columns(self, column_definitions: Dict[str, str]):
+        """
+        Add missing columns to an existing table.
+
+        create_table() uses CREATE TABLE IF NOT EXISTS, so schema evolution needs
+        a small migration step for users who already have older tables.
+        """
+        if self.cursor is None or self.conn is None:
+            raise RuntimeError("数据库连接未建立。")
+
+        existing = self.query(
+            """
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+            """,
+            (self.database, self.table),
+        )
+        existing_names = {row["COLUMN_NAME"] for row in existing}
+
+        for column_name, definition in column_definitions.items():
+            if column_name in existing_names:
+                continue
+            self.cursor.execute(f"ALTER TABLE `{self.table}` ADD COLUMN {definition}")
+
+        self.conn.commit()
 
     def create_table(self):
         """

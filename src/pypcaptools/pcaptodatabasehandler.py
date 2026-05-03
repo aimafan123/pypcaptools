@@ -16,7 +16,7 @@ import os
 import re
 import warnings
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import mysql.connector
 
@@ -81,6 +81,7 @@ class PcapToDatabaseHandler(PcapHandler):
         protocol: str = "direct",
         accessed_website: str = "unknown",
         collection_machine: str = "",
+        site_id: Optional[str] = None,
     ):
         super().__init__(input_pcap_file)
 
@@ -100,6 +101,51 @@ class PcapToDatabaseHandler(PcapHandler):
         self.protocol = protocol
         self.accessed_website = accessed_website
         self.collection_machine = collection_machine
+        self.site_id = site_id or accessed_website
+
+    @staticmethod
+    def _normalize_packet_nums(packet_nums: Any) -> List[int]:
+        if not isinstance(packet_nums, list):
+            return []
+
+        normalized = []
+        for packet_num in packet_nums:
+            try:
+                normalized.append(int(packet_num))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(normalized))
+
+    @staticmethod
+    def _datetime_from_epoch(value: Any) -> Optional[datetime]:
+        if value is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(value))
+        except (TypeError, ValueError, OSError):
+            return None
+
+    @staticmethod
+    def _datetime_from_flow_packets(
+        packet_nums: List[int],
+        trace_to_flow_index: Dict[int, int],
+        flow_timestamps: List[float],
+        flow_start_dt: datetime,
+        *,
+        use_max: bool = False,
+    ) -> Optional[datetime]:
+        offsets = []
+        for packet_num in packet_nums:
+            flow_index = trace_to_flow_index.get(packet_num)
+            if flow_index is None or not (0 <= flow_index < len(flow_timestamps)):
+                continue
+            offsets.append(float(flow_timestamps[flow_index]))
+
+        if not offsets:
+            return None
+
+        offset_s = max(offsets) if use_max else min(offsets)
+        return flow_start_dt + timedelta(seconds=offset_s)
 
     def pcap_to_database(self) -> bool:
         """
@@ -136,6 +182,7 @@ class PcapToDatabaseHandler(PcapHandler):
             # 准备 `traces` 表所需的数据字典
             trace_db_data = {
                 "accessed_website": self.accessed_website,
+                "site_id": self.site_id,
                 "capture_time": trace_pcap_data["capture_time"],
                 "timestamps_seq": trace_pcap_data["timestamps_seq"],
                 "payload_seq": trace_pcap_data["payload_seq"],
@@ -221,6 +268,9 @@ class PcapToDatabaseHandler(PcapHandler):
                         "resources": json_flow_info.get("resources", []),
                         "flow_start_time_ms": flow_db_data.get("flow_start_time_ms", 0),
                         "timestamps_seq": flow_db_data.get("timestamps_seq", []),
+                        "trace_packet_indices": flow_db_data.get(
+                            "trace_packet_indices", []
+                        ),
                     }
 
                 # --- 步骤 2.1: 批量插入 `flows` ---
@@ -256,76 +306,117 @@ class PcapToDatabaseHandler(PcapHandler):
                     flow_id = flow_info["id"]
                     flow_start_ms = flow_info.get("flow_start_time_ms", 0)
                     flow_ts_seq = flow_info.get("timestamps_seq", [])
+                    trace_packet_indices = flow_info.get("trace_packet_indices", [])
+                    trace_to_flow_index = {
+                        int(trace_packet_num): i
+                        for i, trace_packet_num in enumerate(trace_packet_indices)
+                    }
+                    flow_start_dt = trace_pcap_data["capture_time"] + timedelta(
+                        milliseconds=flow_start_ms
+                    )
 
-                    for resource in flow_info.get("resources", []):
+                    for resource_index, resource in enumerate(
+                        flow_info.get("resources", [])
+                    ):
                         # 过滤不完整的资源
                         if "incomplete" in resource.get("url", "") or not resource.get(
                             "status"
                         ):
                             continue
 
-                        packet_seq_list = resource.get("response_packet_nums", [])
-                        response_start_ts = None
-                        response_end_ts = None
+                        request_packet_nums = self._normalize_packet_nums(
+                            resource.get("request_packet_nums", [])
+                        )
+                        response_packet_nums = self._normalize_packet_nums(
+                            resource.get("response_packet_nums", [])
+                        )
+                        trace_packet_nums = sorted(
+                            set(request_packet_nums + response_packet_nums)
+                        )
 
-                        if (
-                            isinstance(packet_seq_list, list)
-                            and packet_seq_list
-                            and flow_ts_seq
-                        ):
-                            is_zero_based = 0 in packet_seq_list or (
-                                min(packet_seq_list) == 0
+                        request_start_ts = self._datetime_from_epoch(
+                            resource.get("request_time")
+                        )
+                        response_start_ts = self._datetime_from_epoch(
+                            resource.get("response_start_time")
+                        )
+                        response_end_ts = self._datetime_from_epoch(
+                            resource.get("response_end_time")
+                        )
+
+                        if request_start_ts is None:
+                            request_start_ts = self._datetime_from_flow_packets(
+                                request_packet_nums,
+                                trace_to_flow_index,
+                                flow_ts_seq,
+                                flow_start_dt,
                             )
-                            idxs = []
-                            for n in packet_seq_list:
-                                i = n if is_zero_based else n - 1
-                                if 0 <= i < len(flow_ts_seq):
-                                    idxs.append(i)
+                        if response_start_ts is None:
+                            response_start_ts = self._datetime_from_flow_packets(
+                                response_packet_nums,
+                                trace_to_flow_index,
+                                flow_ts_seq,
+                                flow_start_dt,
+                            )
+                        if response_end_ts is None:
+                            response_end_ts = self._datetime_from_flow_packets(
+                                response_packet_nums,
+                                trace_to_flow_index,
+                                flow_ts_seq,
+                                flow_start_dt,
+                                use_max=True,
+                            )
 
-                            if idxs:
-                                start_offset_s = min(flow_ts_seq[i] for i in idxs)
-                                end_offset_s = max(flow_ts_seq[i] for i in idxs)
-                                flow_start_dt = trace_pcap_data[
-                                    "capture_time"
-                                ] + timedelta(milliseconds=flow_start_ms)
-                                response_start_ts = flow_start_dt + timedelta(
-                                    seconds=start_offset_s
-                                )
-                                response_end_ts = flow_start_dt + timedelta(
-                                    seconds=end_offset_s
-                                )
-
-                        # 如果JSON中提供了绝对时间戳，优先使用它们
-                        try:
-                            if resource.get("response_start_time") is not None:
-                                response_start_ts = datetime.fromtimestamp(
-                                    float(resource.get("response_start_time"))
-                                )
-                            if resource.get("response_end_time") is not None:
-                                response_end_ts = datetime.fromtimestamp(
-                                    float(resource.get("response_end_time"))
-                                )
-                        except Exception:
-                            # 如果转换失败，保留之前计算的结果或None
-                            pass
+                        ttfb_ms = (
+                            float(resource["ttfb_sec"]) * 1000
+                            if resource.get("ttfb_sec") is not None
+                            else None
+                        )
+                        duration_ms = (
+                            float(resource["duration_sec"]) * 1000
+                            if resource.get("duration_sec") is not None
+                            else None
+                        )
 
                         resources_to_insert.append(
                             {
                                 "flow_id": flow_id,
+                                "resource_index": resource_index,
                                 "stream_id": resource.get("stream_id"),
                                 "url": resource.get("url"),
                                 "http_status": int(resource.get("status"))
                                 if resource.get("status") is not None
                                 else None,
                                 "content_type": resource.get("content_type"),
+                                "request_size_bytes": resource.get(
+                                    "request_data_size"
+                                ),
                                 "resource_size_bytes": resource.get(
                                     "resource_data_size"
                                 ),
-                                "server_packet_count": len(packet_seq_list),
-                                "trace_packet_indices": packet_seq_list,
+                                "headers_packet_num": resource.get(
+                                    "headers_packet_num"
+                                ),
+                                "headers_flow_packet_num": resource.get(
+                                    "headers_flow_packet_num"
+                                ),
+                                "request_packet_count": len(request_packet_nums),
+                                "server_packet_count": len(response_packet_nums),
+                                "request_packet_nums": request_packet_nums,
+                                "response_packet_nums": response_packet_nums,
+                                "request_flow_packet_nums": resource.get(
+                                    "request_flow_packet_nums", []
+                                ),
+                                "response_flow_packet_nums": resource.get(
+                                    "response_flow_packet_nums", []
+                                ),
+                                "trace_packet_indices": trace_packet_nums,
+                                "request_start_ts": request_start_ts,
                                 "response_start_ts": response_start_ts,
                                 "response_end_ts": response_end_ts,
-                                "latency_ms": float(resource.get("ttfb_sec", 0)) * 1000,
+                                "ttfb_ms": ttfb_ms,
+                                "duration_ms": duration_ms,
+                                "latency_ms": ttfb_ms,
                             }
                         )
 
@@ -371,24 +462,24 @@ if __name__ == "__main__":
     # --- 示例数据库配置 ---
     # 请根据您的实际数据库环境修改以下配置信息
     db_config: DBConfig = {
-        "host": "192.168.194.63",  # 数据库主机名或IP地址
+        "host": "zgc2",  # 数据库主机名或IP地址
         "port": 3306,  # 数据库端口
         "user": "root",  # 数据库用户名
         "password": "aimafan",  # 数据库密码
         "database": "WebsitesTraffic_test",  # 数据库名称
     }
-    my_base_table_name = "trojan_top_100"
+    my_base_table_name = "direct_top_100"
 
     # --- 示例 PCAP 文件路径 ---
     # 请确保此路径指向一个实际存在的 PCAP 文件，或在运行前创建此文件
     # 例如，您可以下载一个测试用的 PCAP 文件到当前目录
-    test_pcap_file = "/home/aimafan/Documents/mycode/pypcaptools/test/81045_20251020_16_20_02_github.com.pcap"
-    test_json_file = "/home/aimafan/Documents/mycode/pypcaptools/test/results.json"
+    test_pcap_file = "/home/aimafan/Documents/mycode/pypcaptools/test/direct_20251211001744_149.28.235.233_us_blogger.com.pcap"
+    test_json_file = "/home/aimafan/Documents/mycode/pypcaptools/test/direct_20251211001744_149.28.235.233_us_blogger.com.json"
     # test_json_file = ""
 
     # --- 测试数据参数 ---
-    protocol_type = "trojan"  # 示例协议类型
-    trace_table_name = flow_table_name = "trojan"  # 存储 Flow 数据的表名
+    protocol_type = "https"  # 示例协议类型
+    trace_table_name = flow_table_name = "https"  # 存储 Flow 数据的表名
 
     accessed_website_name = "apple.com"  # 访问的网站
     collection_machine_info = "debian12_ko"  # 采集机器信息
